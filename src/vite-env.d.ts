@@ -9,3 +9,5 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+declare var pendo: { trackAgent: (eventType: string, metadata: object) => void };

@@ -111,6 +111,18 @@ export default function SessionPage() {
       };
       setTranscript([turn]);
       setCognitiveState(response.updatedState);
+
+      // Track agent opening response with Pendo
+      if (typeof pendo !== "undefined") {
+        pendo.trackAgent("agent_response", {
+          agentId: "jZ6Xh31H-eipqCjJOGgxKwDzGBY",
+          conversationId: sessionId,
+          messageId: `agent_response_${turn.id}_${Date.now()}`,
+          content: response.reply,
+          modelUsed: "gemini-2.0-flash",
+        });
+      }
+
       setStatus("persona-speaking");
       speak(response.reply, setup.persona, () => {
         setStatus("idle");
@@ -223,6 +235,16 @@ export default function SessionPage() {
     setCurrentTranscript("");
     setStatus("processing");
 
+    // Track user prompt with Pendo
+    if (typeof pendo !== "undefined") {
+      pendo.trackAgent("prompt", {
+        agentId: "jZ6Xh31H-eipqCjJOGgxKwDzGBY",
+        conversationId: sessionId,
+        messageId: `prompt_${turnId}_${Date.now()}`,
+        content: text,
+      });
+    }
+
     // Check for interruption
     const interruption = checkForInterruption(
       text,
@@ -266,6 +288,17 @@ export default function SessionPage() {
 
       setTranscript((prev) => [...prev, personaTurn]);
       setCognitiveState(response.updatedState);
+
+      // Track agent response with Pendo
+      if (typeof pendo !== "undefined") {
+        pendo.trackAgent("agent_response", {
+          agentId: "jZ6Xh31H-eipqCjJOGgxKwDzGBY",
+          conversationId: sessionId,
+          messageId: `agent_response_${personaTurn.id}_${Date.now()}`,
+          content: response.reply,
+          modelUsed: "gemini-2.0-flash",
+        });
+      }
 
       if (response.shouldEnd) {
         setStatus("persona-speaking");
