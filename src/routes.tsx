@@ -6,6 +6,7 @@ const SetupPage = lazy(() => import("./pages/SetupPage"));
 const SessionPage = lazy(() => import("./pages/SessionPage"));
 const FeedbackPage = lazy(() => import("./pages/FeedbackPage"));
 const HistoryPage = lazy(() => import("./pages/HistoryPage"));
+const RewindPage = lazy(() => import("./pages/RewindPage"));
 
 const PageSuspense = ({ children }: { children: ReactNode }) => (
   <Suspense
@@ -79,6 +80,15 @@ export const routes: RouteConfig[] = [
     element: (
       <PageSuspense>
         <HistoryPage />
+      </PageSuspense>
+    ),
+  },
+  {
+    name: "Rewind",
+    path: "/rewind",
+    element: (
+      <PageSuspense>
+        <RewindPage />
       </PageSuspense>
     ),
   },

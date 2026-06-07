@@ -13,6 +13,7 @@ import {
   Minus,
   MessageSquare,
   Download,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,7 +25,7 @@ import {
 } from "@/services/storage";
 import { generateSessionFeedback } from "@/services/gemini";
 import { PERSONAS } from "@/lib/constants";
-import type { SessionFeedback, SessionRecord } from "@/types";
+import type { SessionFeedback, SessionRecord, ConversationTurn } from "@/types";
 import type { ImprovementDelta } from "@/services/storage";
 
 export default function FeedbackPage() {
@@ -205,6 +206,25 @@ export default function FeedbackPage() {
       }
       setShowShareCard(false);
     }, 100);
+  };
+
+  const handleRewind = (userTurn: ConversationTurn) => {
+    if (!session || !feedback) return;
+    // Find the persona turn that preceded this user turn
+    const precedingTurn = session.transcript.find(
+      (t) => t.role === "persona" && t.id === userTurn.id - 1
+    );
+    if (!precedingTurn) return;
+
+    const rewindContext = {
+      setup: session.setup,
+      cognitiveState: session.cognitiveState,
+      precedingPersonaTurn: precedingTurn,
+      originalUserTurn: userTurn,
+      transcriptUpToTurn: session.transcript.filter((t) => t.id <= userTurn.id),
+    };
+    sessionStorage.setItem("pitchforge_rewind", JSON.stringify(rewindContext));
+    navigate("/rewind");
   };
 
   if (loading) {
@@ -549,6 +569,15 @@ export default function FeedbackPage() {
                       </div>
                     </div>
                     <p className="text-foreground/90">{turn.content}</p>
+                    {turn.role === "user" && (
+                      <button
+                        onClick={() => handleRewind(turn)}
+                        className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Rewind this answer
+                      </button>
+                    )}
                   </div>
                 );
               })}
