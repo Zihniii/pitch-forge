@@ -31,12 +31,32 @@ export function DocumentUpload({ onExtracted, className }: DocumentUploadProps) 
     try {
       const text = await extractText(selected);
       if (text.trim().length < 10) {
+        (window as any).pendo?.track("document_upload_failed", {
+          fileType: selected.name.split(".").pop()?.toLowerCase() || "unknown",
+          fileSize: selected.size,
+          fileName: selected.name,
+          errorMessage: "Could not extract meaningful text from this file.",
+        });
         setError("Could not extract meaningful text from this file.");
         setExtracting(false);
         return;
       }
+
+      (window as any).pendo?.track("document_uploaded", {
+        fileType: selected.name.split(".").pop()?.toLowerCase() || "unknown",
+        fileSize: selected.size,
+        extractedTextLength: text.length,
+        fileName: selected.name,
+      });
+
       onExtracted(text);
     } catch (err) {
+      (window as any).pendo?.track("document_upload_failed", {
+        fileType: selected.name.split(".").pop()?.toLowerCase() || "unknown",
+        fileSize: selected.size,
+        fileName: selected.name,
+        errorMessage: "Failed to read file.",
+      });
       setError("Failed to read file. Try a .txt or .md file instead.");
     } finally {
       setExtracting(false);

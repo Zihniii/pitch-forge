@@ -13,6 +13,21 @@ export default function HistoryPage() {
     .sort((a, b) => (b.endedAt || 0) - (a.endedAt || 0));
 
   const handleDelete = (id: string) => {
+    const deletedSession = sessions.find((s) => s.id === id);
+    const deletedFeedback = deletedSession?.feedback;
+    const deletedScore = deletedFeedback
+      ? Math.round(deletedFeedback.dimensions.reduce((sum, d) => sum + d.score, 0) / deletedFeedback.dimensions.length)
+      : undefined;
+
+    (window as any).pendo?.track("session_deleted", {
+      deletedSessionId: id,
+      deletedSessionVerdict: deletedFeedback?.verdict,
+      deletedSessionScore: deletedScore,
+      deletedSessionScenario: deletedSession?.setup.scenario,
+      deletedSessionPersona: deletedSession?.setup.persona,
+      totalRemainingSessionCount: sessions.length - 1,
+    });
+
     deleteSession(id);
     // Force re-render
     window.location.reload();

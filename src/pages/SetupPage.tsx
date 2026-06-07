@@ -41,6 +41,17 @@ export default function SetupPage() {
       persona,
       pressureLevel,
     };
+
+    (window as any).pendo?.track("session_setup_completed", {
+      scenario,
+      persona,
+      pressureLevel,
+      nameAndRole,
+      hasDocumentUpload: productDescription.includes("---"),
+      productDescriptionLength: productDescription.length,
+      valuePropositionLength: valueProposition.length,
+    });
+
     // Store setup in sessionStorage so SessionPage can pick it up
     sessionStorage.setItem("pitchforge_setup", JSON.stringify(setup));
     navigate("/session");
