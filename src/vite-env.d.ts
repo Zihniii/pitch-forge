@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+declare var pendo: any;
+
 interface ImportMetaEnv {
   readonly VITE_GEMINI_API_KEY: string;
 }
