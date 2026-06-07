@@ -69,8 +69,34 @@ export default function FeedbackPage() {
       // Calculate improvement delta
       const improvementDelta = getImprovementDelta(completed);
       setDelta(improvementDelta);
+
+      const overallScore = Math.round(
+        result.dimensions.reduce((sum, d) => sum + d.score, 0) / result.dimensions.length
+      );
+      (window as any).pendo?.track("feedback_generated", {
+        sessionId: session.id,
+        verdict: result.verdict,
+        overallScore,
+        scenario: session.setup.scenario,
+        persona: session.setup.persona,
+        pressureLevel: session.setup.pressureLevel,
+        buzzwordCount: result.buzzwordCount,
+        fillerCount: result.fillerCount,
+        averageWpm: result.averageWpm,
+        hasImprovementDelta: improvementDelta?.hasComparison || false,
+        improvementDeltaScore: improvementDelta?.overallDelta || 0,
+        previousVerdict: improvementDelta?.previousVerdict || "none",
+      });
     } catch (err) {
       console.error("Feedback generation failed:", err);
+      (window as any).pendo?.track("feedback_generation_failed", {
+        sessionId: session.id,
+        scenario: session.setup.scenario,
+        persona: session.setup.persona,
+        pressureLevel: session.setup.pressureLevel,
+        errorMessage: String(err).substring(0, 200),
+        transcriptTurnCount: session.transcript.length,
+      });
       setError("Failed to generate feedback. Please try again.");
     } finally {
       setLoading(false);
@@ -153,11 +179,29 @@ export default function FeedbackPage() {
         link.download = `pitchforge-${feedback?.verdict?.toLowerCase()}-${Date.now()}.png`;
         link.href = canvas.toDataURL("image/png");
         link.click();
+
+        (window as any).pendo?.track("share_card_downloaded", {
+          sessionId: session?.id,
+          verdict: feedback?.verdict,
+          overallScore,
+          hasImprovementDelta: delta?.hasComparison || false,
+          improvementDeltaScore: delta?.overallDelta || 0,
+          shareMethod: "png_download",
+        });
       } catch {
         // Fallback: copy text
         const text = `${feedback?.verdict} | Score: ${Math.round((feedback?.dimensions.reduce((sum, d) => sum + d.score, 0) || 0) / (feedback?.dimensions.length || 1))}/100\n${feedback?.primaryReason}\n\n#EveryoneShipsNow #PitchForge`;
         await navigator.clipboard.writeText(text);
         alert("Share text copied to clipboard!");
+
+        (window as any).pendo?.track("share_card_downloaded", {
+          sessionId: session?.id,
+          verdict: feedback?.verdict,
+          overallScore,
+          hasImprovementDelta: delta?.hasComparison || false,
+          improvementDeltaScore: delta?.overallDelta || 0,
+          shareMethod: "clipboard_copy",
+        });
       }
       setShowShareCard(false);
     }, 100);

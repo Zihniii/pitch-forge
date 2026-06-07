@@ -124,11 +124,29 @@ export default function SessionPage() {
       }
 
       setStatus("persona-speaking");
+
+      (window as any).pendo?.track("practice_session_started", {
+        scenario: setup.scenario,
+        persona: setup.persona,
+        pressureLevel: setup.pressureLevel,
+        sessionId: sessionId,
+      });
+
       speak(response.reply, setup.persona, () => {
         setStatus("idle");
       });
     } catch (error) {
       console.error("Failed to get persona opening:", error);
+
+      (window as any).pendo?.track("persona_response_failed", {
+        sessionId,
+        turnNumber: 1,
+        isOpeningGreeting: true,
+        errorMessage: String(error).substring(0, 200),
+        scenario: setup.scenario,
+        persona: setup.persona,
+      });
+
       const persona = PERSONAS[setup.persona];
       const fallback = `Hello. I'm ${persona.name}. You have my attention. Go ahead.`;
       const turn: ConversationTurn = {
@@ -187,6 +205,13 @@ export default function SessionPage() {
       },
       onError: (error) => {
         console.error("Speech error:", error);
+        (window as any).pendo?.track("speech_recognition_error", {
+          sessionId,
+          errorType: typeof error === "object" && error !== null ? (error as any).error || "unknown" : "unknown",
+          errorMessage: String(error).substring(0, 200),
+          turnNumber: Math.ceil((transcriptRef.current?.length || 0) / 2) + 1,
+          browserUserAgent: navigator.userAgent.substring(0, 200),
+        });
       },
     });
   }, [setup, status]);
@@ -231,6 +256,18 @@ export default function SessionPage() {
       },
     };
 
+    (window as any).pendo?.track("user_turn_completed", {
+      sessionId,
+      turnId,
+      wpm,
+      fillerCount,
+      buzzwordCount,
+      turnDurationSeconds: Math.round(duration / 1000),
+      wordCount: text.split(/\s+/).length,
+      scenario: setup.scenario,
+      persona: setup.persona,
+    });
+
     setTranscript((prev) => [...prev, userTurn]);
     setCurrentTranscript("");
     setStatus("processing");
@@ -257,6 +294,15 @@ export default function SessionPage() {
       interruption.reason &&
       interruption.message
     ) {
+      (window as any).pendo?.track("interruption_triggered", {
+        sessionId,
+        turnId,
+        interruptionReason: interruption.reason,
+        scenario: setup.scenario,
+        persona: setup.persona,
+        pressureLevel: setup.pressureLevel,
+      });
+
       setInterruptions((prev) => [
         ...prev,
         { reason: interruption.reason!, turnId, timestamp: Date.now() },
@@ -316,6 +362,14 @@ export default function SessionPage() {
       }
     } catch (error) {
       console.error("LLM error:", error);
+      (window as any).pendo?.track("persona_response_failed", {
+        sessionId,
+        turnNumber: turnId + 1,
+        isOpeningGreeting: false,
+        errorMessage: String(error).substring(0, 200),
+        scenario: setup.scenario,
+        persona: setup.persona,
+      });
       setStatus("idle");
     }
   };
@@ -339,6 +393,18 @@ export default function SessionPage() {
       startedAt: startTime,
       endedAt: Date.now(),
     };
+
+    const userTurns = finalTranscript.filter((t) => t.role === "user");
+    (window as any).pendo?.track("practice_session_completed", {
+      sessionId,
+      scenario: setup!.scenario,
+      persona: setup!.persona,
+      pressureLevel: setup!.pressureLevel,
+      totalTurns: userTurns.length,
+      totalInterruptions: interruptions.length,
+      sessionDurationSeconds: Math.round((Date.now() - startTime) / 1000),
+      endReason: finalTranscript.length >= MAX_TURNS * 2 ? "max_turns" : "user_ended",
+    });
 
     saveCurrentSession(record);
     navigate("/feedback");
