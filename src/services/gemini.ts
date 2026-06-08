@@ -378,6 +378,12 @@ export async function generatePersonaResponse(input: PersonaTurnInput): Promise<
     };
   } catch (err) {
     console.error("Persona turn failed:", err);
+    (window as any).pendo?.track("persona_response_failed", {
+      scenario: input.setup.scenario,
+      persona: input.setup.persona,
+      turnNumber: input.transcript.length,
+      error: (err as Error)?.message || 'Unknown error',
+    });
     return fallbackTurn(input, persona, pressure.multiplier);
   }
 }

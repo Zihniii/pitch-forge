@@ -95,6 +95,12 @@ export default function SessionPage() {
     const session = new LiveSession(setup, {
       onOpen: () => {
         setStatus("live");
+        (window as any).pendo?.track("practice_session_started", {
+          sessionId: sessionIdRef.current,
+          scenario: setup.scenario,
+          persona: setup.persona,
+          pressureLevel: setup.pressureLevel,
+        });
         // poll input level for the mic meter
         levelTimerRef.current = setInterval(() => {
           setInputLevel(sessionRef.current?.getInputLevel() ?? 0);
@@ -125,11 +131,22 @@ export default function SessionPage() {
       onPersonaSpeakingEnd: () => setPersonaSpeaking(false),
       onInterrupted: () => {
         bargeCountRef.current += 1;
+        (window as any).pendo?.track("interruption_triggered", {
+          sessionId: sessionIdRef.current,
+          interruptionCount: bargeCountRef.current,
+        });
         setBargeFlash(true);
         setTimeout(() => setBargeFlash(false), 1400);
       },
       onTurnComplete: () => {
-        setTurnCount((c) => c + 1);
+        setTurnCount((c) => {
+          const next = c + 1;
+          (window as any).pendo?.track("user_turn_completed", {
+            sessionId: sessionIdRef.current,
+            turnNumber: next,
+          });
+          return next;
+        });
         // lock in whatever the persona just said as the standing line
         if (personaBufRef.current) {
           setPersonaLine(personaBufRef.current);
@@ -194,6 +211,16 @@ export default function SessionPage() {
       endedAt: Date.now(),
     };
     saveCurrentSession(record);
+
+    (window as any).pendo?.track("practice_session_completed", {
+      sessionId: sessionIdRef.current,
+      scenario: setup.scenario,
+      persona: setup.persona,
+      pressureLevel: setup.pressureLevel,
+      turnCount: transcript.filter((t) => t.role === "user").length,
+      interruptionCount: bargeCountRef.current,
+      durationSec: Math.round((Date.now() - startTimeRef.current) / 1000),
+    });
 
     // Real measured signals from the user's transcribed words.
     const userText = transcript.filter((t) => t.role === "user").map((t) => t.content).join(" ");

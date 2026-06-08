@@ -110,6 +110,12 @@ export default function RewindPage() {
       });
     } catch (err) {
       console.error("Rewind LLM error:", err);
+      (window as any).pendo?.track("persona_response_failed", {
+        scenario: context.setup.scenario,
+        persona: context.setup.persona,
+        isRewind: true,
+        error: (err as Error)?.message || 'Unknown error',
+      });
       setStatus("done");
     }
   };

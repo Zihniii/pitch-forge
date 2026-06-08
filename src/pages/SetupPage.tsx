@@ -99,6 +99,26 @@ export default function SetupPage() {
     if (targetedWeakness) {
       sessionStorage.setItem("pitchforge_weakness", targetedWeakness);
     }
+
+    // Persist and sync visitor metadata
+    const [rawName, ...roleParts] = nameAndRole.split(",");
+    const visitorName = rawName.trim();
+    const visitorRole = roleParts.join(",").trim();
+    localStorage.setItem('pitchforge_visitor_meta', JSON.stringify({ visitorName, visitorRole }));
+    (window as any).pendo?.identify?.({
+      visitor: {
+        id: localStorage.getItem('pitchforge_visitor_id') || '',
+        visitorName,
+        visitorRole,
+      },
+    });
+
+    (window as any).pendo?.track("session_setup_completed", {
+      scenario,
+      persona,
+      pressureLevel,
+    });
+
     navigate("/session");
   };
 
