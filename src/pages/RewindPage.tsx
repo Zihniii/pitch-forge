@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Mic, MicOff, RotateCcw, Check, Volume2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ArrowLeft, Mic, Square, RotateCcw, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { OpponentPresence } from "@/components/OpponentPresence";
 import { PERSONAS } from "@/lib/constants";
 import { generatePersonaResponse } from "@/services/gemini";
 import { startListening, stopListening, speak, stopSpeaking } from "@/services/speech";
@@ -38,6 +38,7 @@ export default function RewindPage() {
       return;
     }
     setContext(JSON.parse(raw) as RewindContext);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleStartListening = useCallback(() => {
@@ -46,37 +47,27 @@ export default function RewindPage() {
     turnStartRef.current = Date.now();
     turnTextRef.current = "";
     setCurrentTranscript("");
-
     startListening({
       onResult: (text, isFinal) => {
         if (isFinal) {
           turnTextRef.current += " " + text;
           setCurrentTranscript(turnTextRef.current.trim());
         } else {
-          setCurrentTranscript(turnTextRef.current + " " + text);
+          setCurrentTranscript((turnTextRef.current + " " + text).trim());
         }
       },
-      onSilence: () => {
-        if (turnTextRef.current.trim().length > 0) {
-          handleSubmitAnswer();
-        }
-      },
-      onEnd: () => {
-        if (turnTextRef.current.trim().length > 0) {
-          handleSubmitAnswer();
-        }
-      },
+      onSilence: () => { if (turnTextRef.current.trim().length > 0) handleSubmitAnswer(); },
+      onEnd: () => { if (turnTextRef.current.trim().length > 0) handleSubmitAnswer(); },
       onError: (err) => console.error("Speech error:", err),
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
   const handleStopListening = useCallback(() => {
     stopListening();
-    if (turnTextRef.current.trim().length > 0) {
-      handleSubmitAnswer();
-    } else {
-      setStatus("ready");
-    }
+    if (turnTextRef.current.trim().length > 0) handleSubmitAnswer();
+    else setStatus("ready");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSubmitAnswer = async () => {
@@ -87,7 +78,6 @@ export default function RewindPage() {
     setNewAnswer(text);
     setStatus("processing");
 
-    // Build transcript up to this point, replacing the original user turn with the new one
     const newUserTurn: ConversationTurn = {
       id: context.originalUserTurn.id,
       role: "user",
@@ -105,25 +95,18 @@ export default function RewindPage() {
     ];
 
     try {
-      const response = await generatePersonaResponse(
-        context.setup,
-        context.cognitiveState,
-        rewindTranscript
-      );
-
+      const response = await generatePersonaResponse({
+        setup: context.setup,
+        state: context.cognitiveState,
+        transcript: rewindTranscript,
+        askedQuestions: [],
+      });
       setPersonaReaction(response.reply);
       setStatus("persona-speaking");
-
-      // Generate comparison
-      const comparisonText = generateComparison(
-        context.originalUserTurn.content,
-        text,
-        response.reply
-      );
-      setComparison(comparisonText);
-
-      speak(response.reply, context.setup.persona, () => {
-        setStatus("done");
+      setComparison(generateComparison(context.originalUserTurn.content, text));
+      speak(response.reply, context.setup.persona, {
+        emotion: response.emotion,
+        onEnd: () => setStatus("done"),
       });
     } catch (err) {
       console.error("Rewind LLM error:", err);
@@ -143,169 +126,168 @@ export default function RewindPage() {
   if (!context) return null;
 
   const persona = PERSONAS[context.setup.persona];
+  const presenceState =
+    status === "listening" ? "listening"
+    : status === "processing" ? "thinking"
+    : status === "persona-speaking" ? "speaking"
+    : "idle";
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="flex items-center gap-3 p-6 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
+    <div className="relative min-h-screen overflow-hidden spotlight">
+      <div className="arena-grid pointer-events-none absolute inset-0 opacity-30" />
+
+      <header className="relative z-20 flex items-center gap-3 px-5 py-4 md:px-8">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </button>
         <div>
-          <h1 className="font-semibold">Conversation Rewind</h1>
-          <p className="text-xs text-muted-foreground">
-            Re-attempt Turn {context.originalUserTurn.id}
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">Rewind</p>
+          <p className="font-display text-[15px] font-semibold tracking-tight">
+            Re-take turn {context.originalUserTurn.id}
           </p>
         </div>
       </header>
 
-      <main className="flex-1 p-6 max-w-2xl mx-auto w-full space-y-6">
-        {/* The persona's question that preceded the user's answer */}
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground font-medium">
-            {persona.name} asked:
+      <main className="relative z-10 mx-auto w-full max-w-xl px-6 pb-44 pt-2">
+        {/* Opponent presence */}
+        <div className="flex flex-col items-center">
+          <OpponentPresence
+            initial={persona.name.charAt(0)}
+            state={presenceState}
+            threat={5}
+            size={104}
+          />
+          <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            {persona.name} asked
           </p>
-          <div className="rounded-lg border border-border bg-card p-4">
-            <p className="text-sm">{context.precedingPersonaTurn.content}</p>
-          </div>
+          <p className="mt-2 text-center font-display text-lg font-medium leading-snug tracking-tight">
+            {context.precedingPersonaTurn.content}
+          </p>
         </div>
 
         {/* Original answer */}
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground font-medium">
-            Your original answer (Turn {context.originalUserTurn.id}):
+        <div className="mt-8 space-y-1.5">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            What you said
           </p>
-          <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
-            <p className="text-sm text-foreground/70">
+          <div className="rounded-xl border border-deny/20 bg-deny/[0.05] p-4">
+            <p className="text-[13px] leading-relaxed text-foreground/70">
               {context.originalUserTurn.content}
             </p>
           </div>
         </div>
 
-        {/* New answer area */}
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground font-medium">
-            {status === "done" ? "Your new answer:" : "Try again — say it better:"}
-          </p>
-
-          {newAnswer ? (
-            <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-4">
-              <p className="text-sm">{newAnswer}</p>
-            </div>
-          ) : currentTranscript && status === "listening" ? (
-            <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
-              <p className="text-sm text-foreground/70">{currentTranscript}</p>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Persona reaction */}
-        {personaReaction && (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground font-medium">
-              {persona.name}'s reaction:
+        {/* New answer */}
+        {(newAnswer || (currentTranscript && status === "listening")) && (
+          <div className="mt-4 space-y-1.5">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-primary">
+              {status === "done" ? "Your retake" : "Speaking…"}
             </p>
-            <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-sm">{personaReaction}</p>
+            <div
+              className={cn(
+                "rounded-xl border p-4",
+                newAnswer ? "border-confirm/25 bg-confirm/[0.05]" : "border-primary/25 bg-primary/[0.05]"
+              )}
+            >
+              <p className="text-[13px] leading-relaxed">
+                {newAnswer || currentTranscript}
+              </p>
             </div>
           </div>
         )}
 
-        {/* Comparison */}
+        {/* Reaction */}
+        {personaReaction && (
+          <div className="mt-4 space-y-1.5">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              {persona.name}'s reaction
+            </p>
+            <div className="rounded-xl border border-border bg-card/60 p-4">
+              <p className="text-[14px] leading-relaxed">{personaReaction}</p>
+            </div>
+          </div>
+        )}
+
         {comparison && (
-          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
-            <p className="text-xs font-medium text-primary">Quick Assessment</p>
-            <p className="text-sm">{comparison}</p>
+          <div className="mt-4 rounded-xl border border-primary/25 bg-primary/[0.06] p-4">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-primary">Quick read</p>
+            <p className="mt-1.5 text-[13px]">{comparison}</p>
           </div>
-        )}
-
-        {/* Controls */}
-        <div className="flex items-center justify-center gap-4 pt-4">
-          {status === "ready" && (
-            <Button
-              onClick={handleStartListening}
-              size="lg"
-              className="w-16 h-16 rounded-full relative"
-            >
-              <Mic className="w-6 h-6" />
-            </Button>
-          )}
-
-          {status === "listening" && (
-            <Button
-              onClick={handleStopListening}
-              size="lg"
-              variant="destructive"
-              className="w-16 h-16 rounded-full animate-pulse"
-            >
-              <MicOff className="w-6 h-6" />
-            </Button>
-          )}
-
-          {status === "processing" && (
-            <div className="flex gap-1">
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="w-2 h-2 rounded-full bg-primary"
-                  style={{ animation: `pulseDot 1s ease-in-out ${i * 0.2}s infinite` }}
-                />
-              ))}
-            </div>
-          )}
-
-          {status === "persona-speaking" && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Volume2 className="w-4 h-4 animate-pulse text-primary" />
-              <span>{persona.name} is reacting...</span>
-            </div>
-          )}
-
-          {status === "done" && (
-            <div className="flex gap-3">
-              <Button onClick={handleReset} variant="outline">
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Try Again
-              </Button>
-              <Button onClick={() => navigate(-1)}>
-                <Check className="w-4 h-4 mr-2" />
-                Done
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {status === "ready" && (
-          <p className="text-center text-xs text-muted-foreground">
-            Tap the mic to record your improved answer
-          </p>
         )}
       </main>
+
+      {/* Control dock */}
+      <div className="fixed inset-x-0 bottom-0 z-30 flex flex-col items-center pb-8 pt-6">
+        {status === "ready" && (
+          <button
+            onClick={handleStartListening}
+            className="group relative flex h-18 w-18 items-center justify-center rounded-full bg-primary p-6 text-primary-foreground transition-transform hover:scale-105 cursor-pointer"
+            aria-label="Record retake"
+          >
+            <span className="absolute -inset-2 rounded-full border border-primary/30" />
+            <Mic className="h-6 w-6" />
+          </button>
+        )}
+        {status === "listening" && (
+          <button
+            onClick={handleStopListening}
+            className="group relative flex items-center justify-center rounded-full bg-deny p-6 text-white transition-transform hover:scale-105 cursor-pointer"
+            aria-label="Lock in retake"
+          >
+            <span className="absolute inset-0 rounded-full bg-deny opacity-40 live-pulse" />
+            <Square className="relative h-6 w-6 fill-current" />
+          </button>
+        )}
+        {status === "processing" && (
+          <div className="flex gap-1.5">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-2 w-2 rounded-full bg-primary" style={{ animation: `pulseDot 1s ease-in-out ${i * 0.2}s infinite` }} />
+            ))}
+          </div>
+        )}
+        {status === "done" && (
+          <div className="flex gap-3">
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Again
+            </button>
+            <button
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-display text-[13px] font-semibold text-primary-foreground cursor-pointer"
+            >
+              <Check className="h-4 w-4" />
+              Done
+            </button>
+          </div>
+        )}
+        <p className="mt-3 font-mono text-[11px] text-muted-foreground">
+          {status === "ready"
+            ? "Tap to record your better answer"
+            : status === "listening"
+              ? "Tap to lock it in"
+              : status === "persona-speaking"
+                ? `${persona.name} is reacting…`
+                : ""}
+        </p>
+      </div>
     </div>
   );
 }
 
-// --- Comparison Helper ---
-
-function generateComparison(original: string, newAnswer: string, reaction: string): string {
-  const originalWords = original.split(/\s+/).length;
-  const newWords = newAnswer.split(/\s+/).length;
-  const shorter = newWords < originalWords;
-  const brevityNote = shorter
-    ? `More concise (${newWords} words vs ${originalWords}).`
-    : newWords === originalWords
-      ? `Same length.`
-      : `Longer (${newWords} words vs ${originalWords}).`;
-
-  // Simple heuristic comparison
-  const improvements: string[] = [];
-  if (shorter) improvements.push("Better brevity");
-  if (!newAnswer.toLowerCase().includes("um") && original.toLowerCase().includes("um")) {
-    improvements.push("Fewer fillers");
-  }
-  if (newAnswer.split(".").length > original.split(".").length) {
-    improvements.push("Better structure");
-  }
-
-  return `${brevityNote} ${improvements.length > 0 ? improvements.join(", ") + "." : "Compare the persona's reaction to gauge improvement."}`;
+function generateComparison(original: string, newAnswer: string): string {
+  const o = original.split(/\s+/).length;
+  const n = newAnswer.split(/\s+/).length;
+  const notes: string[] = [];
+  if (n < o) notes.push(`Tighter — ${n} words vs ${o}`);
+  else if (n > o) notes.push(`Longer — ${n} words vs ${o}`);
+  else notes.push("Same length");
+  if (!/\bum\b|\buh\b/i.test(newAnswer) && /\bum\b|\buh\b/i.test(original)) notes.push("fewer fillers");
+  if (newAnswer.split(".").length > original.split(".").length) notes.push("clearer structure");
+  return notes.join(" · ") + ".";
 }

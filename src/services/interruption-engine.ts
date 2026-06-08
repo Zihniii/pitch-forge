@@ -17,13 +17,14 @@ export interface InterruptionCheck {
 
 /**
  * Analyzes a user's turn text and metadata to determine if
- * the persona should interrupt.
+ * the persona should interrupt. The message is a DIRECTIVE that is
+ * actually fed to the persona prompt (not just shown in UI).
  */
 export function checkForInterruption(
   turnText: string,
   turnDurationMs: number,
   wpm: number,
-  state: CognitiveState
+  _state: CognitiveState
 ): InterruptionCheck {
   // Check buzzword overload
   const buzzwordCount = countBuzzwords(turnText);
@@ -136,4 +137,16 @@ export function detectFillersInText(text: string): string[] {
     if (regex.test(lower)) found.push(filler);
   }
   return found;
+}
+
+const REASON_LABELS: Record<InterruptionReason, string> = {
+  "long-silence": "long silence / hesitation",
+  "excessive-fillers": "too many filler words",
+  rambling: "rambling without a point",
+  "buzzword-overload": "buzzword overload",
+  "low-wpm-hesitation": "hesitant, halting delivery",
+};
+
+export function interruptionReasonLabel(reason: InterruptionReason): string {
+  return REASON_LABELS[reason];
 }

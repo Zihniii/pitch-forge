@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
 import { Upload, FileText, X, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface DocumentUploadProps {
@@ -73,14 +72,14 @@ export function DocumentUpload({ onExtracted, className }: DocumentUploadProps) 
     <div className={cn("space-y-2", className)}>
       {!file ? (
         <label
-          className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border p-6 cursor-pointer hover:border-primary/50 transition-colors"
+          className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card/30 p-5 transition-colors hover:border-primary/40"
         >
-          <Upload className="w-6 h-6 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            Upload a document (PDF, TXT, MD)
+          <Upload className="h-5 w-5 text-muted-foreground" />
+          <p className="text-[13px] text-muted-foreground">
+            Drop a deck, resume, or PRD <span className="text-muted-foreground/50">(PDF, TXT, MD)</span>
           </p>
-          <p className="text-xs text-muted-foreground/60">
-            We'll extract context to challenge you on specific claims
+          <p className="font-mono text-[10px] text-muted-foreground/50">
+            Your opponent will challenge the exact claims inside it
           </p>
           <input
             ref={inputRef}

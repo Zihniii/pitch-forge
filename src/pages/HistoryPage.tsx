@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Trash2, ArrowRight, Swords } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getAllSessions, deleteSession } from "@/services/storage";
-import { PERSONAS } from "@/lib/constants";
+import { getProgressionProfile, sessionRatingDelta } from "@/services/progression";
+import { PERSONAS, SCENARIOS } from "@/lib/constants";
 import type { SessionRecord } from "@/types";
 
 export default function HistoryPage() {
@@ -11,119 +11,120 @@ export default function HistoryPage() {
   const sessions = getAllSessions()
     .filter((s) => s.feedback !== null)
     .sort((a, b) => (b.endedAt || 0) - (a.endedAt || 0));
+  const profile = getProgressionProfile();
 
   const handleDelete = (id: string) => {
-    const deletedSession = sessions.find((s) => s.id === id);
-    const deletedFeedback = deletedSession?.feedback;
-    const deletedScore = deletedFeedback
-      ? Math.round(deletedFeedback.dimensions.reduce((sum, d) => sum + d.score, 0) / deletedFeedback.dimensions.length)
-      : undefined;
-
-    (window as any).pendo?.track("session_deleted", {
-      deletedSessionId: id,
-      deletedSessionVerdict: deletedFeedback?.verdict,
-      deletedSessionScore: deletedScore,
-      deletedSessionScenario: deletedSession?.setup.scenario,
-      deletedSessionPersona: deletedSession?.setup.persona,
-      totalRemainingSessionCount: sessions.length - 1,
-    });
-
     deleteSession(id);
-    // Force re-render
     window.location.reload();
   };
 
-  const formatDate = (timestamp: number) => {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(new Date(timestamp));
-  };
-
   return (
-    <div className="min-h-screen">
-      <header className="flex items-center gap-3 p-6">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/")}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <h1 className="font-semibold">Session History</h1>
-        <span className="text-xs text-muted-foreground ml-auto">
-          {sessions.length} session{sessions.length !== 1 ? "s" : ""}
-        </span>
-      </header>
+    <div className="relative min-h-screen spotlight">
+      <div className="arena-grid pointer-events-none absolute inset-0 opacity-30" />
 
-      <main className="max-w-2xl mx-auto px-6 space-y-3">
+      <div className="relative page-enter mx-auto max-w-2xl px-6 pt-24 pb-16">
+        <div className="flex items-end justify-between">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+              Combat record
+            </p>
+            <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">
+              {sessions.length} engagement{sessions.length === 1 ? "" : "s"}
+            </h1>
+          </div>
+          {sessions.length > 0 && (
+            <div className="text-right">
+              <p className="font-mono text-2xl font-bold tracking-tighter">{profile.rating}</p>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                Current CR
+              </p>
+            </div>
+          )}
+        </div>
+
         {sessions.length === 0 ? (
-          <div className="text-center py-20 space-y-4">
-            <p className="text-muted-foreground">No sessions yet.</p>
-            <Button onClick={() => navigate("/setup")}>Start Your First Session</Button>
+          <div className="mt-12 flex flex-col items-center rounded-2xl border border-border bg-card/40 p-12 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+              <Swords className="h-6 w-6 text-primary" />
+            </div>
+            <p className="mt-4 font-display text-lg font-semibold">No battles yet</p>
+            <p className="mt-1 max-w-xs text-[13px] text-muted-foreground">
+              Your record is clean. Step into the arena and start building it.
+            </p>
+            <button
+              onClick={() => navigate("/setup")}
+              className="group mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 font-display text-[13px] font-semibold text-primary-foreground transition-all hover:gap-3 cursor-pointer"
+            >
+              Enter the arena
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </div>
         ) : (
-          sessions.map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
-              onDelete={() => handleDelete(session.id)}
-              formatDate={formatDate}
-            />
-          ))
+          <div className="mt-8 space-y-2">
+            {sessions.map((s) => (
+              <Row key={s.id} session={s} onDelete={() => handleDelete(s.id)} />
+            ))}
+          </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
 
-function SessionCard({
-  session,
-  onDelete,
-  formatDate,
-}: {
-  session: SessionRecord;
-  onDelete: () => void;
-  formatDate: (ts: number) => string;
-}) {
-  const feedback = session.feedback!;
+function Row({ session, onDelete }: { session: SessionRecord; onDelete: () => void }) {
+  const f = session.feedback!;
   const persona = PERSONAS[session.setup.persona];
-  const avgScore = Math.round(
-    feedback.dimensions.reduce((sum, d) => sum + d.score, 0) / feedback.dimensions.length
-  );
+  const scenario = SCENARIOS.find((sc) => sc.id === session.setup.scenario)?.name || session.setup.scenario;
+  const score = Math.round(f.dimensions.reduce((sum, d) => sum + d.score, 0) / f.dimensions.length);
+  const delta = sessionRatingDelta(session);
+  const date = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(session.endedAt || session.startedAt));
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span
-            className={cn(
-              "text-xs font-bold px-2 py-0.5 rounded",
-              feedback.verdict === "YES" && "bg-green-500/10 text-green-500",
-              feedback.verdict === "NO" && "bg-red-500/10 text-red-500",
-              feedback.verdict === "MAYBE" && "bg-amber-500/10 text-amber-500"
-            )}
-          >
-            {feedback.verdict}
-          </span>
-          <span className="text-sm font-medium">{persona?.title || "Persona"}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-bold">{avgScore}</span>
-          <button
-            onClick={onDelete}
-            className="p-1 text-muted-foreground hover:text-destructive transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+    <div className="group flex items-center gap-4 rounded-xl border border-border bg-card/50 px-4 py-3.5 transition-colors hover:border-muted-foreground/30">
+      {/* Verdict chip */}
+      <span
+        className={cn(
+          "flex h-10 w-14 shrink-0 items-center justify-center rounded-lg font-display text-[11px] font-bold uppercase tracking-wider",
+          f.verdict === "YES" && "bg-confirm/10 text-confirm",
+          f.verdict === "NO" && "bg-deny/10 text-deny",
+          f.verdict === "MAYBE" && "bg-hold/10 text-hold"
+        )}
+      >
+        {f.verdict}
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-display text-[14px] font-medium">{persona?.title}</p>
+        <p className="font-mono text-[11px] text-muted-foreground">
+          {scenario} · {date}
+        </p>
       </div>
 
-      <p className="text-xs text-muted-foreground line-clamp-2">
-        {feedback.primaryReason}
-      </p>
-
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>{session.setup.scenario.replace("-", " ")}</span>
-        <span>{formatDate(session.endedAt || session.startedAt)}</span>
+      <div className="flex items-center gap-4">
+        <div className="text-right">
+          <p className="font-mono text-[14px] font-bold">{score}</p>
+          <span
+            className={cn(
+              "font-mono text-[10px] font-semibold",
+              delta >= 0 ? "text-confirm" : "text-deny"
+            )}
+          >
+            {delta >= 0 ? "+" : ""}
+            {delta} CR
+          </span>
+        </div>
+        <button
+          onClick={onDelete}
+          className="p-1.5 text-muted-foreground/50 transition-colors hover:text-deny cursor-pointer"
+          aria-label="Delete session"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   );

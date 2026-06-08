@@ -18,7 +18,7 @@ const PageSuspense = ({ children }: { children: ReactNode }) => (
               key={i}
               className="w-2 h-2 rounded-full"
               style={{
-                background: "#7C6FE0",
+                background: "hsl(38 94% 56%)",
                 animation: `pulseDot 1s ease-in-out ${i * 0.2}s infinite`,
               }}
             />

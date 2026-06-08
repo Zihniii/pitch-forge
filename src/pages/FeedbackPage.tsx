@@ -1,32 +1,33 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft,
-  Repeat,
-  Home,
   Trophy,
   AlertTriangle,
-  Sparkles,
+  Target,
   Share2,
+  RotateCcw,
+  ArrowRight,
+  Home,
   TrendingUp,
   TrendingDown,
-  Minus,
-  MessageSquare,
-  Download,
-  RotateCcw,
+  ChevronDown,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   getCurrentSession,
   saveSession,
   clearCurrentSession,
-  getImprovementDelta,
 } from "@/services/storage";
 import { generateSessionFeedback } from "@/services/gemini";
+import { deltaForLatest, rankForRating, getProgressionProfile } from "@/services/progression";
 import { PERSONAS } from "@/lib/constants";
-import type { SessionFeedback, SessionRecord, ConversationTurn } from "@/types";
-import type { ImprovementDelta } from "@/services/storage";
+import type { SessionFeedback, SessionRecord, ConversationTurn, Verdict, FeedbackMoment } from "@/types";
+
+const VERDICT_COPY: Record<Verdict, { word: string; line: string; spotlight: string; color: string }> = {
+  YES: { word: "YES", line: "They're in.", spotlight: "spotlight-confirm", color: "text-confirm" },
+  NO: { word: "NO", line: "They walked.", spotlight: "spotlight-deny", color: "text-deny" },
+  MAYBE: { word: "MAYBE", line: "You left them on the fence.", spotlight: "spotlight-hold", color: "text-hold" },
+};
 
 export default function FeedbackPage() {
   const navigate = useNavigate();
@@ -34,216 +35,109 @@ export default function FeedbackPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<SessionRecord | null>(null);
-  const [delta, setDelta] = useState<ImprovementDelta | null>(null);
+  const [ratingDelta, setRatingDelta] = useState<number | null>(null);
+  const [newRating, setNewRating] = useState<number | null>(null);
+  const [revealed, setRevealed] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
-  const [showShareCard, setShowShareCard] = useState(false);
-  const shareCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const currentSession = getCurrentSession();
-    if (!currentSession) {
+    const current = getCurrentSession();
+    if (!current) {
       navigate("/");
       return;
     }
-    setSession(currentSession);
-    generateFeedback(currentSession);
+    setSession(current);
+    generateFeedback(current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const generateFeedback = async (session: SessionRecord) => {
+  const generateFeedback = async (s: SessionRecord) => {
     try {
-      const result = await generateSessionFeedback(
-        session.setup,
-        session.transcript,
-        session.cognitiveState
-      );
+      const measuredRaw = sessionStorage.getItem("pitchforge_measured");
+      const measured = measuredRaw
+        ? JSON.parse(measuredRaw)
+        : { buzzwordCount: 0, fillerCount: 0, averageWpm: 0, totalDuration: 0, interruptionCount: 0 };
+      const result = await generateSessionFeedback(s.setup, s.transcript, s.cognitiveState, measured);
       setFeedback(result);
+      sessionStorage.removeItem("pitchforge_measured");
 
-      // Save completed session
-      const completed: SessionRecord = {
-        ...session,
-        feedback: result,
-        endedAt: Date.now(),
-      };
+      const completed: SessionRecord = { ...s, feedback: result, endedAt: Date.now() };
       saveSession(completed);
       clearCurrentSession();
 
-      // Calculate improvement delta
-      const improvementDelta = getImprovementDelta(completed);
-      setDelta(improvementDelta);
+      const delta = deltaForLatest(completed.id);
+      setRatingDelta(delta);
+      setNewRating(getProgressionProfile().rating);
 
-      const overallScore = Math.round(
+      const overall = Math.round(
         result.dimensions.reduce((sum, d) => sum + d.score, 0) / result.dimensions.length
       );
       (window as any).pendo?.track("feedback_generated", {
-        sessionId: session.id,
+        sessionId: s.id,
         verdict: result.verdict,
-        overallScore,
-        scenario: session.setup.scenario,
-        persona: session.setup.persona,
-        pressureLevel: session.setup.pressureLevel,
-        buzzwordCount: result.buzzwordCount,
-        fillerCount: result.fillerCount,
-        averageWpm: result.averageWpm,
-        hasImprovementDelta: improvementDelta?.hasComparison || false,
-        improvementDeltaScore: improvementDelta?.overallDelta || 0,
-        previousVerdict: improvementDelta?.previousVerdict || "none",
+        overallScore: overall,
+        scenario: s.setup.scenario,
+        persona: s.setup.persona,
+        pressureLevel: s.setup.pressureLevel,
+        ratingDelta: delta ?? 0,
       });
     } catch (err) {
       console.error("Feedback generation failed:", err);
-      (window as any).pendo?.track("feedback_generation_failed", {
-        sessionId: session.id,
-        scenario: session.setup.scenario,
-        persona: session.setup.persona,
-        pressureLevel: session.setup.pressureLevel,
-        errorMessage: String(err).substring(0, 200),
-        transcriptTurnCount: session.transcript.length,
-      });
-      setError("Failed to generate feedback. Please try again.");
+      setError("The judge's verdict was lost in transmission. Try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleShareCard = async () => {
-    setShowShareCard(true);
-    // Give time for render, then use canvas API to capture
-    setTimeout(async () => {
-      if (!shareCardRef.current) return;
-      try {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d")!;
-        canvas.width = 600;
-        canvas.height = 400;
-
-        // Draw share card
-        ctx.fillStyle = "#0D0D14";
-        ctx.fillRect(0, 0, 600, 400);
-
-        // Border
-        ctx.strokeStyle = feedback?.verdict === "YES" ? "#22c55e" : feedback?.verdict === "NO" ? "#ef4444" : "#f59e0b";
-        ctx.lineWidth = 3;
-        ctx.strokeRect(2, 2, 596, 396);
-
-        // Logo
-        ctx.font = "bold 18px Inter, system-ui";
-        ctx.fillStyle = "#7C6FE0";
-        ctx.fillText("PitchForge", 30, 45);
-
-        // Verdict
-        ctx.font = "black 72px Inter, system-ui";
-        ctx.fillStyle = feedback?.verdict === "YES" ? "#22c55e" : feedback?.verdict === "NO" ? "#ef4444" : "#f59e0b";
-        ctx.fillText(feedback?.verdict || "", 30, 140);
-
-        // Score
-        const overallScore = Math.round(
-          (feedback?.dimensions.reduce((sum, d) => sum + d.score, 0) || 0) / (feedback?.dimensions.length || 1)
-        );
-        ctx.font = "bold 28px Inter, system-ui";
-        ctx.fillStyle = "#E2E2E8";
-        ctx.fillText(`Score: ${overallScore}/100`, 30, 190);
-
-        // Delta
-        if (delta?.hasComparison) {
-          const sign = delta.overallDelta >= 0 ? "+" : "";
-          ctx.font = "16px Inter, system-ui";
-          ctx.fillStyle = delta.overallDelta >= 0 ? "#1DB88E" : "#E05555";
-          ctx.fillText(`${sign}${delta.overallDelta} from last session`, 30, 220);
-        }
-
-        // Primary reason
-        ctx.font = "14px Inter, system-ui";
-        ctx.fillStyle = "#888799";
-        const reason = feedback?.primaryReason || "";
-        const words = reason.split(" ");
-        let line = "";
-        let y = 260;
-        for (const word of words) {
-          const test = line + word + " ";
-          if (ctx.measureText(test).width > 540) {
-            ctx.fillText(line.trim(), 30, y);
-            line = word + " ";
-            y += 20;
-            if (y > 320) break;
-          } else {
-            line = test;
-          }
-        }
-        if (y <= 320) ctx.fillText(line.trim(), 30, y);
-
-        // Hashtag
-        ctx.font = "14px Inter, system-ui";
-        ctx.fillStyle = "#7C6FE0";
-        ctx.fillText("#EveryoneShipsNow  ·  pitchforge.app", 30, 375);
-
-        // Download
-        const link = document.createElement("a");
-        link.download = `pitchforge-${feedback?.verdict?.toLowerCase()}-${Date.now()}.png`;
-        link.href = canvas.toDataURL("image/png");
-        link.click();
-
-        (window as any).pendo?.track("share_card_downloaded", {
-          sessionId: session?.id,
-          verdict: feedback?.verdict,
-          overallScore,
-          hasImprovementDelta: delta?.hasComparison || false,
-          improvementDeltaScore: delta?.overallDelta || 0,
-          shareMethod: "png_download",
-        });
-      } catch {
-        // Fallback: copy text
-        const text = `${feedback?.verdict} | Score: ${Math.round((feedback?.dimensions.reduce((sum, d) => sum + d.score, 0) || 0) / (feedback?.dimensions.length || 1))}/100\n${feedback?.primaryReason}\n\n#EveryoneShipsNow #PitchForge`;
-        await navigator.clipboard.writeText(text);
-        alert("Share text copied to clipboard!");
-
-        (window as any).pendo?.track("share_card_downloaded", {
-          sessionId: session?.id,
-          verdict: feedback?.verdict,
-          overallScore,
-          hasImprovementDelta: delta?.hasComparison || false,
-          improvementDeltaScore: delta?.overallDelta || 0,
-          shareMethod: "clipboard_copy",
-        });
-      }
-      setShowShareCard(false);
-    }, 100);
+  const handleShare = async () => {
+    if (!feedback) return;
+    const overall = overallScore(feedback);
+    const text = `PitchForge — ${feedback.verdict} · ${overall}/100${
+      ratingDelta !== null ? ` (${ratingDelta >= 0 ? "+" : ""}${ratingDelta} CR)` : ""
+    }\n${feedback.primaryReason}\n\n#EveryoneShipsNow`;
+    try {
+      await navigator.clipboard.writeText(text);
+      const { toast } = await import("sonner");
+      toast.success("Verdict copied to clipboard");
+    } catch {
+      /* noop */
+    }
   };
 
   const handleRewind = (userTurn: ConversationTurn) => {
-    if (!session || !feedback) return;
-    // Find the persona turn that preceded this user turn
-    const precedingTurn = session.transcript.find(
-      (t) => t.role === "persona" && t.id === userTurn.id - 1
+    if (!session) return;
+    const preceding = session.transcript.find((t) => t.role === "persona" && t.id === userTurn.id - 1);
+    if (!preceding) return;
+    sessionStorage.setItem(
+      "pitchforge_rewind",
+      JSON.stringify({
+        setup: session.setup,
+        cognitiveState: session.cognitiveState,
+        precedingPersonaTurn: preceding,
+        originalUserTurn: userTurn,
+        transcriptUpToTurn: session.transcript.filter((t) => t.id <= userTurn.id),
+      })
     );
-    if (!precedingTurn) return;
-
-    const rewindContext = {
-      setup: session.setup,
-      cognitiveState: session.cognitiveState,
-      precedingPersonaTurn: precedingTurn,
-      originalUserTurn: userTurn,
-      transcriptUpToTurn: session.transcript.filter((t) => t.id <= userTurn.id),
-    };
-    sessionStorage.setItem("pitchforge_rewind", JSON.stringify(rewindContext));
     navigate("/rewind");
   };
 
+  // ---- Loading: the wait builds tension ----
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="flex gap-1 justify-center">
+      <div className="flex min-h-screen items-center justify-center spotlight">
+        <div className="space-y-5 text-center">
+          <div className="flex justify-center gap-1.5">
             {[0, 1, 2].map((i) => (
               <div
                 key={i}
-                className="w-2.5 h-2.5 rounded-full bg-primary"
-                style={{
-                  animation: `pulseDot 1s ease-in-out ${i * 0.2}s infinite`,
-                }}
+                className="h-2.5 w-2.5 rounded-full bg-primary"
+                style={{ animation: `pulseDot 1s ease-in-out ${i * 0.2}s infinite` }}
               />
             ))}
           </div>
-          <p className="text-muted-foreground text-sm">
-            Analyzing your performance...
+          <p className="font-display text-lg font-semibold tracking-tight">The room is deciding…</p>
+          <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            Reviewing every word you said
           </p>
         </div>
       </div>
@@ -252,363 +146,410 @@ export default function FeedbackPage() {
 
   if (error || !feedback) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
-        <div className="text-center space-y-4">
-          <AlertTriangle className="w-10 h-10 text-destructive mx-auto" />
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="space-y-4 text-center">
+          <AlertTriangle className="mx-auto h-10 w-10 text-deny" />
           <p className="text-muted-foreground">{error || "Something went wrong"}</p>
-          <Button onClick={() => navigate("/")}>Go Home</Button>
+          <button
+            onClick={() => navigate("/")}
+            className="rounded-lg bg-primary px-5 py-2.5 font-display text-sm font-semibold text-primary-foreground cursor-pointer"
+          >
+            Back to deck
+          </button>
         </div>
       </div>
     );
   }
 
-  const overallScore = Math.round(
-    feedback.dimensions.reduce((sum, d) => sum + d.score, 0) / feedback.dimensions.length
-  );
-
+  const overall = overallScore(feedback);
   const persona = session ? PERSONAS[session.setup.persona] : null;
+  const copy = VERDICT_COPY[feedback.verdict];
 
-  return (
-    <div className="min-h-screen pb-10">
-      {/* Header */}
-      <header className="flex items-center gap-3 p-6">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/")}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <h1 className="font-semibold">Session Feedback</h1>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto text-muted-foreground"
-          onClick={handleShareCard}
-        >
-          <Share2 className="w-4 h-4 mr-1" />
-          Share
-        </Button>
-      </header>
+  // ---- Verdict reveal (full screen) ----
+  if (!revealed) {
+    return (
+      <div className={cn("relative flex min-h-screen flex-col items-center justify-center overflow-hidden", copy.spotlight)}>
+        <div className="arena-grid pointer-events-none absolute inset-0 opacity-40" />
+        <div className="vignette pointer-events-none absolute inset-0" />
 
-      <main className="max-w-2xl mx-auto px-6 space-y-6">
-        {/* Verdict Card */}
-        <div
-          className={cn(
-            "rounded-xl border-2 p-6 text-center space-y-3",
-            feedback.verdict === "YES" && "border-green-500 bg-green-500/5",
-            feedback.verdict === "NO" && "border-red-500 bg-red-500/5",
-            feedback.verdict === "MAYBE" && "border-amber-500 bg-amber-500/5"
-          )}
-        >
-          <p
-            className={cn(
-              "text-5xl font-black",
-              feedback.verdict === "YES" && "text-green-500",
-              feedback.verdict === "NO" && "text-red-500",
-              feedback.verdict === "MAYBE" && "text-amber-500"
-            )}
-          >
-            {feedback.verdict}
+        <div className="relative z-10 flex flex-col items-center px-6 text-center">
+          <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+            {persona?.name} delivers the verdict
           </p>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+
+          <h1 className={cn("verdict-in mt-6 font-display text-[88px] font-bold leading-none tracking-tightest md:text-[140px]", copy.color)}>
+            {copy.word}
+          </h1>
+
+          <p className="mt-4 font-display text-xl font-medium tracking-tight text-foreground md:text-2xl">
+            {feedback.verdictLine || copy.line}
+          </p>
+
+          <p className="mt-5 max-w-md text-[14px] leading-relaxed text-muted-foreground">
             {feedback.primaryReason}
           </p>
+
+          {/* Rating swing */}
+          {ratingDelta !== null && newRating !== null && (
+            <div className="mt-8 flex items-center gap-3 rounded-full border border-border bg-card/60 px-5 py-2.5">
+              <span className="font-mono text-sm text-muted-foreground">Communication Rating</span>
+              <span className="font-mono text-lg font-bold">{newRating}</span>
+              <span
+                className={cn(
+                  "flex items-center gap-1 font-mono text-sm font-semibold",
+                  ratingDelta >= 0 ? "text-confirm" : "text-deny"
+                )}
+              >
+                {ratingDelta >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                {ratingDelta >= 0 ? "+" : ""}
+                {ratingDelta}
+              </span>
+            </div>
+          )}
+
+          <button
+            onClick={() => setRevealed(true)}
+            className="group mt-10 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 font-display text-[14px] font-semibold text-primary-foreground transition-all hover:gap-3 cursor-pointer"
+          >
+            See the breakdown
+            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Dossier ----
+  return (
+    <div className="min-h-screen page-enter">
+      <div className="mx-auto max-w-2xl px-6 pt-20 pb-16">
+        {/* Verdict recap header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+              Verdict · {persona?.title}
+            </p>
+            <div className="mt-1 flex items-baseline gap-3">
+              <span className={cn("font-display text-4xl font-bold tracking-tight", copy.color)}>
+                {copy.word}
+              </span>
+              {ratingDelta !== null && (
+                <span
+                  className={cn(
+                    "font-mono text-sm font-semibold",
+                    ratingDelta >= 0 ? "text-confirm" : "text-deny"
+                  )}
+                >
+                  {ratingDelta >= 0 ? "+" : ""}
+                  {ratingDelta} CR
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={handleShare}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            Share
+          </button>
         </div>
 
-        {/* Improvement Delta */}
-        {delta?.hasComparison && (
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {delta.overallDelta > 0 ? (
-                  <TrendingUp className="w-4 h-4 text-green-500" />
-                ) : delta.overallDelta < 0 ? (
-                  <TrendingDown className="w-4 h-4 text-red-500" />
-                ) : (
-                  <Minus className="w-4 h-4 text-muted-foreground" />
-                )}
-                <span className="text-sm font-medium">vs Last Session</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span
-                  className={cn(
-                    "text-lg font-bold",
-                    delta.overallDelta > 0 && "text-green-500",
-                    delta.overallDelta < 0 && "text-red-500",
-                    delta.overallDelta === 0 && "text-muted-foreground"
-                  )}
-                >
-                  {delta.overallDelta > 0 ? "+" : ""}
-                  {delta.overallDelta}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  ({delta.previousOverallScore} → {overallScore})
-                </span>
-              </div>
-            </div>
+        {/* Overall score + rank */}
+        <div className="mt-6 flex items-center gap-5 rounded-xl border border-border bg-card/60 p-5">
+          <ScoreRing score={overall} />
+          <div className="flex-1">
+            <p className="font-display text-2xl font-bold tracking-tight">{overall}<span className="text-base text-muted-foreground">/100</span></p>
+            <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              Performance score
+            </p>
+            {newRating !== null && (
+              <p className="mt-2 text-[13px] text-muted-foreground">
+                You're a <span className="font-semibold text-primary">{rankForRating(newRating).name}</span> at{" "}
+                <span className="font-mono text-foreground">{newRating}</span> CR.
+              </p>
+            )}
+          </div>
+        </div>
 
-            {/* Per-dimension deltas */}
-            <div className="mt-3 flex flex-wrap gap-2">
-              {Object.entries(delta.dimensionDeltas).map(([dim, value]) => (
-                <span
-                  key={dim}
+        {/* Strongest + weakness */}
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-confirm/25 bg-confirm/[0.05] p-4">
+            <div className="flex items-center gap-2">
+              <Trophy className="h-4 w-4 text-confirm" />
+              <span className="font-mono text-[10px] uppercase tracking-wider text-confirm">Strongest moment</span>
+            </div>
+            <p className="mt-2 text-[13px] italic leading-relaxed">
+              "{feedback.strongestMoment.content}"
+            </p>
+            <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+              Turn {feedback.strongestMoment.turnNumber} — {feedback.strongestMoment.explanation}
+            </p>
+          </div>
+          <div className="rounded-xl border border-deny/25 bg-deny/[0.05] p-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-deny" />
+              <span className="font-mono text-[10px] uppercase tracking-wider text-deny">What cost you</span>
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed">{feedback.biggestWeakness}</p>
+          </div>
+        </div>
+
+        {/* Replay challenge */}
+        <div className="mt-4 rounded-xl border border-primary/30 bg-gradient-to-br from-primary/[0.08] to-transparent p-5">
+          <div className="flex items-center gap-2">
+            <Target className="h-4 w-4 text-primary" />
+            <span className="font-mono text-[10px] uppercase tracking-wider text-primary">Your next mission</span>
+          </div>
+          <p className="mt-2 text-[14px] leading-relaxed text-foreground">{feedback.replayChallenge}</p>
+          <button
+            onClick={() => navigate("/setup")}
+            className="group mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-display text-[13px] font-semibold text-primary-foreground transition-all hover:gap-3 cursor-pointer"
+          >
+            Run it back
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {/* Moment-by-moment analysis */}
+        <div className="mt-8 space-y-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Moment analysis · every claim cites a turn
+          </p>
+          <MomentCard
+            kind="convince"
+            label="Most convincing answer"
+            moment={feedback.mostConvincingAnswer}
+          />
+          <MomentCard
+            kind="turning"
+            label="Turning point"
+            moment={feedback.turningPoint}
+          />
+          <MomentCard
+            kind="missed"
+            label="Missed opportunity"
+            moment={feedback.missedOpportunity}
+          />
+          <MomentCard
+            kind="damage"
+            label="Most damaging answer"
+            moment={feedback.mostDamagingAnswer}
+          />
+          <MomentCard
+            kind="weak"
+            label="Weakest moment"
+            moment={feedback.weakestMoment}
+          />
+        </div>
+
+        {/* Dimensions */}
+        <div className="mt-8 space-y-2.5">
+          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Eight dimensions · evidence-graded
+          </p>
+          {feedback.dimensions.map((dim, i) => (
+            <DimensionRow key={dim.dimension} dim={dim} index={i} />
+          ))}
+        </div>
+
+        {/* Telemetry */}
+        <div className="mt-6 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-border">
+          <Telemetry label="Buzzwords" value={feedback.buzzwordCount} alert={feedback.buzzwordCount >= 3} />
+          <Telemetry label="Fillers" value={feedback.fillerCount} alert={feedback.fillerCount >= 5} />
+          <Telemetry label="Avg WPM" value={feedback.averageWpm} />
+        </div>
+
+        {/* Transcript */}
+        <button
+          onClick={() => setShowTranscript((v) => !v)}
+          className="mt-8 flex w-full items-center justify-between rounded-lg border border-border px-4 py-3 text-[13px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+        >
+          <span>Replay the full exchange · rewind any answer</span>
+          <ChevronDown className={cn("h-4 w-4 transition-transform", showTranscript && "rotate-180")} />
+        </button>
+
+        {showTranscript && session && (
+          <div className="mt-4 space-y-2.5">
+            {session.transcript.map((turn) => {
+              const isStrongest = turn.role === "user" && turn.id === feedback.strongestMoment.turnNumber;
+              const highFillers = turn.role === "user" && (turn.metadata?.fillerCount || 0) >= 3;
+              const highBuzz = turn.role === "user" && (turn.metadata?.buzzwordCount || 0) >= 2;
+              return (
+                <div
+                  key={turn.id}
                   className={cn(
-                    "text-xs px-2 py-0.5 rounded-full border",
-                    value > 0 && "border-green-500/30 text-green-500 bg-green-500/5",
-                    value < 0 && "border-red-500/30 text-red-500 bg-red-500/5",
-                    value === 0 && "border-border text-muted-foreground"
+                    "rounded-xl border p-3.5 text-[13px]",
+                    turn.role === "user" ? "border-border bg-card/60" : "border-border/50 bg-muted/20",
+                    isStrongest && "border-confirm/40 bg-confirm/[0.05]",
+                    highFillers && !isStrongest && "border-threat/30",
+                    highBuzz && !isStrongest && !highFillers && "border-hold/30"
                   )}
                 >
-                  {dim} {value > 0 ? `+${value}` : value}
-                </span>
-              ))}
-            </div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Turn {turn.id} · {turn.role === "user" ? "You" : persona?.name}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {isStrongest && <Tag className="border-confirm/40 text-confirm">Best</Tag>}
+                      {turn.metadata?.interrupted && <Tag className="border-threat/40 text-threat">Interrupted</Tag>}
+                      {highFillers && <Tag className="border-threat/40 text-threat">{turn.metadata?.fillerCount} fillers</Tag>}
+                      {turn.role === "user" && turn.metadata?.wpm ? (
+                        <Tag className="border-border text-muted-foreground">{turn.metadata.wpm} wpm</Tag>
+                      ) : null}
+                    </div>
+                  </div>
+                  <p className="leading-relaxed text-foreground/90">{turn.content}</p>
+                  {turn.role === "user" && (
+                    <button
+                      onClick={() => handleRewind(turn)}
+                      className="mt-2 flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary cursor-pointer"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Rewind
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* Overall Score Ring */}
-        <div className="flex items-center justify-center">
-          <div className="relative w-28 h-28">
-            <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-              <circle
-                cx="50"
-                cy="50"
-                r="40"
-                fill="none"
-                stroke="hsl(var(--border))"
-                strokeWidth="6"
-              />
-              <circle
-                cx="50"
-                cy="50"
-                r="40"
-                fill="none"
-                stroke="hsl(var(--primary))"
-                strokeWidth="6"
-                strokeLinecap="round"
-                strokeDasharray={`${overallScore * 2.51} ${100 * 2.51}`}
-                className="ring-fill"
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-2xl font-bold">{overallScore}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Dimension Scores */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">
-            Scored Dimensions
-          </h3>
-          <div className="grid grid-cols-1 gap-2">
-            {feedback.dimensions.map((dim) => (
-              <div
-                key={dim.dimension}
-                className="rounded-lg border border-border bg-card p-3 space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium capitalize">
-                    {dim.dimension}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {delta?.hasComparison && delta.dimensionDeltas[dim.dimension] !== undefined && (
-                      <span
-                        className={cn(
-                          "text-xs",
-                          delta.dimensionDeltas[dim.dimension] > 0 && "text-green-500",
-                          delta.dimensionDeltas[dim.dimension] < 0 && "text-red-500"
-                        )}
-                      >
-                        {delta.dimensionDeltas[dim.dimension] > 0 ? "↑" : delta.dimensionDeltas[dim.dimension] < 0 ? "↓" : ""}
-                        {delta.dimensionDeltas[dim.dimension] !== 0 && Math.abs(delta.dimensionDeltas[dim.dimension])}
-                      </span>
-                    )}
-                    <span className="text-sm font-bold">{dim.score}</span>
-                  </div>
-                </div>
-                <div className="w-full h-1.5 rounded-full bg-border overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all duration-1000"
-                    style={{ width: `${dim.score}%` }}
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">{dim.evidence}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Strongest Moment */}
-        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-green-500" />
-            <h3 className="text-sm font-medium text-green-400">
-              Strongest Moment
-            </h3>
-          </div>
-          <p className="text-sm italic">
-            &ldquo;{feedback.strongestMoment.content}&rdquo;
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Turn {feedback.strongestMoment.turnNumber} —{" "}
-            {feedback.strongestMoment.explanation}
-          </p>
-        </div>
-
-        {/* Biggest Weakness */}
-        <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-            <h3 className="text-sm font-medium text-red-400">
-              Biggest Weakness
-            </h3>
-          </div>
-          <p className="text-sm">{feedback.biggestWeakness}</p>
-        </div>
-
-        {/* Replay Challenge */}
-        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <h3 className="text-sm font-medium text-primary">
-              Replay Challenge
-            </h3>
-          </div>
-          <p className="text-sm">{feedback.replayChallenge}</p>
-        </div>
-
-        {/* Stats bar */}
-        <div className="flex items-center justify-around rounded-lg border border-border bg-card p-4">
-          <div className="text-center">
-            <p className="text-lg font-bold">{feedback.buzzwordCount}</p>
-            <p className="text-xs text-muted-foreground">Buzzwords</p>
-          </div>
-          <div className="w-px h-8 bg-border" />
-          <div className="text-center">
-            <p className="text-lg font-bold">{feedback.fillerCount}</p>
-            <p className="text-xs text-muted-foreground">Fillers</p>
-          </div>
-          <div className="w-px h-8 bg-border" />
-          <div className="text-center">
-            <p className="text-lg font-bold">{feedback.averageWpm}</p>
-            <p className="text-xs text-muted-foreground">WPM</p>
-          </div>
-        </div>
-
-        {/* Annotated Transcript Toggle */}
-        <div>
+        {/* Footer actions */}
+        <div className="mt-10 flex gap-3">
           <button
-            onClick={() => setShowTranscript(!showTranscript)}
-            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => navigate("/setup")}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-display text-[14px] font-semibold text-primary-foreground cursor-pointer"
           >
-            <MessageSquare className="w-4 h-4" />
-            {showTranscript ? "Hide" : "View"} Annotated Transcript
+            <RotateCcw className="h-4 w-4" />
+            New session
           </button>
-
-          {showTranscript && session && (
-            <div className="mt-4 space-y-3">
-              {session.transcript.map((turn) => {
-                const isStrongest =
-                  turn.role === "user" &&
-                  turn.id === feedback.strongestMoment.turnNumber;
-                const hasHighFillers =
-                  turn.role === "user" && (turn.metadata?.fillerCount || 0) >= 3;
-                const hasHighBuzzwords =
-                  turn.role === "user" &&
-                  (turn.metadata?.buzzwordCount || 0) >= 2;
-
-                return (
-                  <div
-                    key={turn.id}
-                    className={cn(
-                      "rounded-lg p-3 text-sm border",
-                      turn.role === "user"
-                        ? "ml-4 border-border bg-card"
-                        : "mr-4 border-border/50 bg-muted/30",
-                      isStrongest && "border-green-500/50 bg-green-500/5",
-                      hasHighFillers &&
-                        !isStrongest &&
-                        "border-orange-500/30 bg-orange-500/5",
-                      hasHighBuzzwords &&
-                        !isStrongest &&
-                        !hasHighFillers &&
-                        "border-amber-500/30 bg-amber-500/5"
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-muted-foreground">
-                        Turn {turn.id} ·{" "}
-                        {turn.role === "user"
-                          ? "You"
-                          : persona?.name || "Persona"}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        {isStrongest && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500 font-medium">
-                            ★ Best
-                          </span>
-                        )}
-                        {hasHighFillers && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500 font-medium">
-                            Fillers: {turn.metadata?.fillerCount}
-                          </span>
-                        )}
-                        {hasHighBuzzwords && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-medium">
-                            Buzzwords: {turn.metadata?.buzzwordCount}
-                          </span>
-                        )}
-                        {turn.role === "user" && turn.metadata?.wpm && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                            {turn.metadata.wpm} wpm
-                          </span>
-                        )}
-                        {turn.metadata?.interrupted && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 font-medium">
-                            ⚡ Interrupted
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-foreground/90">{turn.content}</p>
-                    {turn.role === "user" && (
-                      <button
-                        onClick={() => handleRewind(turn)}
-                        className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                        Rewind this answer
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex gap-3 pt-2">
-          <Button onClick={() => navigate("/setup")} className="flex-1">
-            <Repeat className="w-4 h-4 mr-2" />
-            Try Again
-          </Button>
-          <Button
+          <button
             onClick={() => navigate("/")}
-            variant="outline"
-            className="flex-1"
+            className="flex items-center justify-center gap-2 rounded-lg border border-border px-5 py-3 text-[14px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
           >
-            <Home className="w-4 h-4 mr-2" />
-            Home
-          </Button>
+            <Home className="h-4 w-4" />
+            Deck
+          </button>
         </div>
-      </main>
+      </div>
+    </div>
+  );
+}
 
-      {/* Hidden share card for rendering */}
-      {showShareCard && (
-        <div
-          ref={shareCardRef}
-          className="fixed -left-[9999px] top-0"
-          aria-hidden
+/* ---------------- helpers ---------------- */
+
+function overallScore(f: SessionFeedback): number {
+  return Math.round(f.dimensions.reduce((sum, d) => sum + d.score, 0) / f.dimensions.length);
+}
+
+function ScoreRing({ score }: { score: number }) {
+  const r = 34;
+  const circ = 2 * Math.PI * r;
+  const color = score >= 70 ? "hsl(var(--confirm))" : score >= 45 ? "hsl(var(--hold))" : "hsl(var(--deny))";
+  return (
+    <div className="relative h-20 w-20 shrink-0">
+      <svg className="h-full w-full -rotate-90" viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="hsl(var(--border))" strokeWidth="5" />
+        <circle
+          cx="40"
+          cy="40"
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeDasharray={`${(score / 100) * circ} ${circ}`}
+          className="ring-fill"
         />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="font-mono text-lg font-bold">{score}</span>
+      </div>
+    </div>
+  );
+}
+
+function DimensionRow({ dim, index }: { dim: SessionFeedback["dimensions"][number]; index: number }) {
+  const color = dim.score >= 70 ? "bg-confirm" : dim.score >= 45 ? "bg-hold" : "bg-deny";
+  return (
+    <div className="rounded-xl border border-border bg-card/40 p-3.5">
+      <div className="flex items-center justify-between">
+        <span className="font-display text-[14px] font-medium capitalize">{dim.dimension}</span>
+        <span className="font-mono text-[13px] font-bold">{dim.score}</span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border">
+        <div
+          className={cn("h-full origin-left rounded-full", color)}
+          style={{ width: `${dim.score}%`, animation: `barGrow 800ms ${index * 60}ms cubic-bezier(0.22,1,0.36,1) both` }}
+        />
+      </div>
+      <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">{dim.evidence}</p>
+    </div>
+  );
+}
+
+function Telemetry({ label, value, alert }: { label: string; value: number; alert?: boolean }) {
+  return (
+    <div className="bg-card/60 px-4 py-3.5 text-center">
+      <p className={cn("font-mono text-xl font-bold", alert ? "text-deny" : "text-foreground")}>{value}</p>
+      <p className="mt-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function Tag({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <span className={cn("rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider", className)}>
+      {children}
+    </span>
+  );
+}
+
+const MOMENT_STYLES: Record<
+  string,
+  { border: string; label: string; dot: string }
+> = {
+  convince: { border: "border-confirm/25", label: "text-confirm", dot: "bg-confirm" },
+  turning: { border: "border-primary/25", label: "text-primary", dot: "bg-primary" },
+  missed: { border: "border-hold/25", label: "text-hold", dot: "bg-hold" },
+  damage: { border: "border-deny/25", label: "text-deny", dot: "bg-deny" },
+  weak: { border: "border-deny/25", label: "text-deny", dot: "bg-deny" },
+};
+
+function MomentCard({
+  kind,
+  label,
+  moment,
+}: {
+  kind: keyof typeof MOMENT_STYLES;
+  label: string;
+  moment: FeedbackMoment;
+}) {
+  if (!moment || (!moment.quote && !moment.insight)) return null;
+  const s = MOMENT_STYLES[kind];
+  return (
+    <div className={cn("rounded-xl border bg-card/40 p-4", s.border)}>
+      <div className="flex items-center gap-2">
+        <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
+        <span className={cn("font-mono text-[10px] uppercase tracking-wider", s.label)}>{label}</span>
+        {typeof moment.turnNumber === "number" && moment.turnNumber > 0 && (
+          <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+            Turn {moment.turnNumber}
+          </span>
+        )}
+      </div>
+      {moment.quote && (
+        <p className="mt-2 border-l-2 border-border pl-3 text-[13px] italic leading-relaxed text-foreground/85">
+          "{moment.quote}"
+        </p>
+      )}
+      <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{moment.insight}</p>
+      {moment.improvement && (
+        <p className="mt-2 rounded-lg bg-primary/[0.06] px-3 py-2 text-[12px] leading-relaxed text-foreground/90">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-primary">Fix · </span>
+          {moment.improvement}
+        </p>
       )}
     </div>
   );

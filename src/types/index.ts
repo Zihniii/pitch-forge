@@ -3,26 +3,47 @@
 // ============================================================
 
 // --- Persona Types ---
-export type PersonaId =
-  | "skeptical-investor"
-  | "demanding-recruiter"
-  | "hackathon-judge"
-  | "non-technical-customer"
-  | "technical-expert";
+export type PersonaId = string;
+
+export type PersonaCategory =
+  | "startup"
+  | "career"
+  | "sales"
+  | "leadership"
+  | "presentation"
+  | "customer";
+
+export type SpeechPace = "slow" | "measured" | "brisk" | "clipped" | "rapid";
+
+export interface PersonaSpeech {
+  gender: "male" | "female" | "neutral";
+  /** Substrings to prefer when matching an installed system voice. */
+  voiceHints: string[];
+  pace: SpeechPace;
+  baseRate: number;      // 0.1 - 2 (SpeechSynthesis rate)
+  basePitch: number;     // 0 - 2  (SpeechSynthesis pitch)
+  pitchJitter: number;   // per-sentence random variation
+  /** Verbal tics this persona uses when reacting (e.g. "Look,", "Hmm."). */
+  verbalTics: string[];
+}
 
 export interface Persona {
   id: PersonaId;
   name: string;
   title: string;
+  category: PersonaCategory;
+  archetype: string;            // one-line essence
   description: string;
   behavioralProfile: string;
+  goals: string[];              // what this persona is trying to get out of the user
+  personalityTraits: string[];
+  communicationStyle: string;
   pressureTriggers: string[];
+  objectionPatterns: string[];  // recurring objections they escalate through
   signaturePhrases: string[];
-  voiceConfig: {
-    rate: number;
-    pitch: number;
-    voiceName?: string;
-  };
+  openingLines: string[];       // distinct ways to open the conversation
+  emotionalRange: string;       // how their emotion shifts with state
+  speech: PersonaSpeech;
 }
 
 // --- Scenario Types ---
@@ -132,15 +153,29 @@ export interface DimensionScore {
 
 export type Verdict = "YES" | "NO" | "MAYBE";
 
+export interface FeedbackMoment {
+  turnNumber: number;
+  quote: string;        // verbatim or near-verbatim from transcript
+  insight: string;      // why it mattered
+  improvement?: string; // how to do better (optional for positive moments)
+}
+
 export interface SessionFeedback {
   verdict: Verdict;
+  verdictLine: string;       // the persona's in-character one-liner
   primaryReason: string;
   biggestWeakness: string;
+  // Rich moment analysis — all grounded in transcript turns
   strongestMoment: {
     turnNumber: number;
     content: string;
     explanation: string;
   };
+  weakestMoment: FeedbackMoment;
+  turningPoint: FeedbackMoment;
+  missedOpportunity: FeedbackMoment;
+  mostConvincingAnswer: FeedbackMoment;
+  mostDamagingAnswer: FeedbackMoment;
   replayChallenge: string;
   dimensions: DimensionScore[];
   buzzwordCount: number;
@@ -159,6 +194,39 @@ export interface SessionRecord {
   interruptions: InterruptionEvent[];
   startedAt: number;
   endedAt: number | null;
+}
+
+// --- Progression System ---
+export interface RankTier {
+  id: string;
+  name: string;        // e.g. "Contender"
+  min: number;         // min rating for this tier
+  blurb: string;       // identity line
+}
+
+export interface PersonaRecord {
+  personaId: PersonaId;
+  encounters: number;
+  yes: number;
+  maybe: number;
+  no: number;
+}
+
+export interface ProgressionProfile {
+  rating: number;              // Communication Rating (ELO-style)
+  peakRating: number;
+  rank: RankTier;
+  nextRank: RankTier | null;
+  progressToNext: number;      // 0-1 within current tier toward next
+  totalSessions: number;
+  yesRate: number;             // %
+  currentStreak: number;       // consecutive non-NO sessions
+  bestStreak: number;
+  lastDelta: number | null;    // rating change of most recent session
+  personaRecords: PersonaRecord[];
+  topWeakness: { dimension: EvaluationDimension; avgScore: number } | null;
+  dimensionAverages: Record<string, number>;
+  recentRatings: number[];     // chronological rating after each session
 }
 
 // --- Session Status ---

@@ -1,59 +1,195 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   PitchForge — Arena Design System
+   Warm carbon black · amber signal · instrument typography
+   ============================================================ */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    /* Surfaces — warm carbon, near black, faint warmth */
+    --background: 24 9% 5%;
+    --foreground: 40 14% 92%;
+    --card: 24 9% 8%;
+    --card-foreground: 40 14% 92%;
+    --popover: 24 10% 7%;
+    --popover-foreground: 40 14% 92%;
+
+    /* Signal — amber/gold spotlight. The brand energy. */
+    --primary: 38 94% 56%;
+    --primary-foreground: 24 40% 8%;
+
+    /* Secondary — steel, used sparingly */
+    --secondary: 30 7% 14%;
+    --secondary-foreground: 40 14% 92%;
+
+    --muted: 28 8% 12%;
+    --muted-foreground: 34 7% 56%;
+    --accent: 28 8% 13%;
+    --accent-foreground: 40 14% 92%;
+
+    --destructive: 2 75% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 30 7% 14%;
+    --input: 30 7% 13%;
+    --ring: 38 94% 56%;
     --radius: 0.5rem;
+
+    /* Semantic outcome colors */
+    --signal: 38 94% 56%;     /* amber — energy / live */
+    --confirm: 150 58% 46%;   /* emerald — YES */
+    --deny: 2 75% 56%;        /* red — NO / pressure */
+    --hold: 40 92% 55%;       /* amber — MAYBE */
+    --threat: 8 80% 55%;      /* ember — escalation */
   }
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-  }
-}
-
-@layer base {
   * {
     @apply border-border;
+    box-sizing: border-box;
   }
+
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  ::selection { background: hsl(var(--primary) / 0.85); color: hsl(var(--primary-foreground)); }
+
+  * { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer utilities {
+  .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* Tight tracking for big display numerals/headlines */
+  .tracking-tightest { letter-spacing: -0.04em; }
+
+  /* ---- Textures ---- */
+  /* Faint instrument grid — subtle, never neon */
+  .arena-grid {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.35) 1px, transparent 1px);
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 35%, #000 30%, transparent 75%);
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 35%, #000 30%, transparent 75%);
+  }
+
+  /* Warm spotlight wash from top */
+  .spotlight {
+    background:
+      radial-gradient(ellipse 70% 55% at 50% -5%, hsl(var(--primary) / 0.10), transparent 60%);
+  }
+  .spotlight-deny {
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 0%, hsl(var(--deny) / 0.14), transparent 62%);
+  }
+  .spotlight-confirm {
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 0%, hsl(var(--confirm) / 0.14), transparent 62%);
+  }
+  .spotlight-hold {
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 0%, hsl(var(--hold) / 0.14), transparent 62%);
+  }
+  .vignette {
+    box-shadow: inset 0 0 200px 60px hsl(24 9% 3% / 0.9);
+  }
+
+  /* ---- Motion ---- */
+  .page-enter { animation: pageIn 320ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+  @keyframes pageIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .arena-enter { animation: arenaIn 600ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+  @keyframes arenaIn {
+    from { opacity: 0; transform: scale(0.96); filter: blur(6px); }
+    to   { opacity: 1; transform: scale(1); filter: blur(0); }
+  }
+
+  .stagger > * { opacity: 0; animation: staggerIn 460ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+  .stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger > *:nth-child(2) { animation-delay: 70ms; }
+  .stagger > *:nth-child(3) { animation-delay: 140ms; }
+  .stagger > *:nth-child(4) { animation-delay: 210ms; }
+  .stagger > *:nth-child(5) { animation-delay: 280ms; }
+  .stagger > *:nth-child(6) { animation-delay: 350ms; }
+  .stagger > *:nth-child(7) { animation-delay: 420ms; }
+  @keyframes staggerIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulseDot {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50%      { opacity: 1;   transform: scale(1.2); }
+  }
+
+  /* Live recording pulse */
+  .live-pulse { animation: livePulse 1.6s ease-in-out infinite; }
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+  }
+
+  /* Opponent presence — breathing ring */
+  @keyframes presenceBreath {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50%      { transform: scale(1.08); opacity: 0.9; }
+  }
+  @keyframes presenceSpeak {
+    0%, 100% { transform: scale(1); }
+    25%      { transform: scale(1.06); }
+    60%      { transform: scale(0.98); }
+  }
+  .presence-breath { animation: presenceBreath 3.4s ease-in-out infinite; }
+  .presence-speak  { animation: presenceSpeak 0.7s ease-in-out infinite; }
+
+  /* Interruption jolt */
+  .jolt { animation: jolt 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+  @keyframes jolt {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-4px); }
+    40%, 60% { transform: translateX(4px); }
+  }
+
+  /* Verdict slam-in */
+  .verdict-in { animation: verdictIn 700ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+  @keyframes verdictIn {
+    0%   { opacity: 0; transform: scale(1.4); filter: blur(10px); }
+    60%  { opacity: 1; filter: blur(0); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  .ring-fill { transition: stroke-dashoffset 1.3s cubic-bezier(0.22, 1, 0.36, 1); }
+
+  /* Bar fill grow */
+  @keyframes barGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -1,122 +1,17 @@
 import type {
-  Persona,
   Scenario,
   PressureLevelConfig,
   CognitiveState,
 } from "@/types";
+import { PERSONA_LIBRARY } from "./personas";
 
 // ============================================================
-// Personas — PRD Section 8, Step 3
+// Personas — see personas.ts for the full library
 // ============================================================
 
-export const PERSONAS: Record<string, Persona> = {
-  "skeptical-investor": {
-    id: "skeptical-investor",
-    name: "Marcus Chen",
-    title: "Skeptical Investor",
-    description:
-      "Market-focused. Interrupts often. Questions every assumption.",
-    behavioralProfile:
-      "A seasoned VC who has seen 10,000 pitches. Cuts through fluff immediately. Respects specificity and distrusts vague claims.",
-    pressureTriggers: [
-      "Unsupported traction claims",
-      "Weak differentiation",
-      "Vague moat",
-      "No numbers",
-    ],
-    signaturePhrases: [
-      "Why now?",
-      "Who else is doing this?",
-      "What's the real moat?",
-      "Give me a number.",
-      "I've seen this before. Why is yours different?",
-    ],
-    voiceConfig: { rate: 1.0, pitch: 0.9 },
-  },
-  "demanding-recruiter": {
-    id: "demanding-recruiter",
-    name: "Sarah Okonkwo",
-    title: "Demanding Recruiter",
-    description:
-      "Clarity-focused. Evaluates communication quality above content.",
-    behavioralProfile:
-      "Senior recruiter at a top company. Cares about how you communicate, not just what you say. Detects rehearsed answers instantly.",
-    pressureTriggers: [
-      "Vague or rehearsed-sounding answers",
-      "Hedging language",
-      "Not answering the question directly",
-    ],
-    signaturePhrases: [
-      "Tell me more specifically.",
-      "What did you personally do?",
-      "That sounds rehearsed. Try again in your own words.",
-      "I need a concrete example.",
-    ],
-    voiceConfig: { rate: 0.95, pitch: 1.1 },
-  },
-  "hackathon-judge": {
-    id: "hackathon-judge",
-    name: "Alex Rivera",
-    title: "Hackathon Judge",
-    description:
-      "Impact and novelty-focused. Extremely time-constrained.",
-    behavioralProfile:
-      "Has 2 minutes per team. Only cares about: what does it do, why does it matter, and is it real. No patience for setup or backstory.",
-    pressureTriggers: [
-      "Exceeding 90 seconds per answer",
-      "Vague impact claims",
-      "Too much context before the point",
-    ],
-    signaturePhrases: [
-      "What's the actual impact?",
-      "You have 30 seconds.",
-      "Skip the backstory. What does it do?",
-      "Show me, don't tell me.",
-    ],
-    voiceConfig: { rate: 1.1, pitch: 1.0 },
-  },
-  "non-technical-customer": {
-    id: "non-technical-customer",
-    name: "Diana Walsh",
-    title: "Non-Technical Customer",
-    description:
-      "Cares only about value. Confused by acronyms and tech terms.",
-    behavioralProfile:
-      "A decision-maker who will buy if she understands the value. Zero tolerance for jargon. Needs to understand benefits, not features.",
-    pressureTriggers: [
-      "Jargon",
-      "Feature-first explanations",
-      "Undefined technical terms",
-    ],
-    signaturePhrases: [
-      "I don't understand that. Just tell me what it does for me.",
-      "Why should I care?",
-      "My current solution works fine. Convince me.",
-    ],
-    voiceConfig: { rate: 0.9, pitch: 1.15 },
-  },
-  "technical-expert": {
-    id: "technical-expert",
-    name: "Dr. James Park",
-    title: "Technical Expert",
-    description:
-      "Challenges logic, asks for depth, skeptical of hand-waving.",
-    behavioralProfile:
-      "A senior engineer who has built systems at scale. Respects technical depth. Allergic to marketing language. Wants to know how things actually work.",
-    pressureTriggers: [
-      "Vague implementation claims",
-      "Unsupported technical assertions",
-      "Marketing language in technical context",
-    ],
-    signaturePhrases: [
-      "How does that actually work?",
-      "What are the failure modes?",
-      "That sounds like marketing. Give me the architecture.",
-      "What happens at scale?",
-    ],
-    voiceConfig: { rate: 0.95, pitch: 0.85 },
-  },
-};
+export const PERSONAS = PERSONA_LIBRARY;
+
+export { PERSONA_LIBRARY };
 
 // ============================================================
 // Scenarios — PRD Section 8, Step 2
@@ -129,7 +24,7 @@ export const SCENARIOS: Scenario[] = [
     description:
       "Simulate a VC first-meeting pitch. Persona focuses on market size, differentiation, traction, and team.",
     icon: "rocket",
-    defaultPersona: "skeptical-investor",
+    defaultPersona: "skeptical-vc",
   },
   {
     id: "job-interview",
@@ -137,7 +32,7 @@ export const SCENARIOS: Scenario[] = [
     description:
       "Simulate a recruiter or hiring manager screen. Persona evaluates clarity, confidence, and communication.",
     icon: "briefcase",
-    defaultPersona: "demanding-recruiter",
+    defaultPersona: "technical-recruiter",
   },
   {
     id: "technical-presentation",
@@ -145,7 +40,7 @@ export const SCENARIOS: Scenario[] = [
     description:
       "Present a complex system to a non-technical audience. Persona challenges jargon and demands simplicity.",
     icon: "cpu",
-    defaultPersona: "non-technical-customer",
+    defaultPersona: "confused-customer",
   },
   {
     id: "hackathon-demo",
@@ -161,7 +56,7 @@ export const SCENARIOS: Scenario[] = [
     description:
       "Simulate a live product demo to a skeptical prospect. Persona challenges value claims.",
     icon: "presentation",
-    defaultPersona: "non-technical-customer",
+    defaultPersona: "skeptical-prospect",
   },
   {
     id: "customer-discovery",
@@ -169,7 +64,7 @@ export const SCENARIOS: Scenario[] = [
     description:
       "Simulate an exploratory call with a potential customer. Persona pushes back on assumptions.",
     icon: "search",
-    defaultPersona: "non-technical-customer",
+    defaultPersona: "early-adopter",
   },
 ];
 
@@ -311,3 +206,28 @@ export const APP_NAME = "PitchForge";
 export const MAX_TURNS = 15;
 export const SESSION_STORAGE_KEY = "pitchforge_sessions";
 export const CURRENT_SESSION_KEY = "pitchforge_current_session";
+
+// ============================================================
+// Progression — Communication Rating tiers (ELO-style)
+// ============================================================
+
+export const BASE_RATING = 1000;
+
+import type { RankTier } from "@/types";
+
+export const RANK_TIERS: RankTier[] = [
+  { id: "rookie",    name: "Rookie",     min: 0,    blurb: "First time under fire." },
+  { id: "contender", name: "Contender",  min: 1100, blurb: "Holding your ground." },
+  { id: "operator",  name: "Operator",   min: 1250, blurb: "Composed under pressure." },
+  { id: "closer",    name: "Closer",     min: 1400, blurb: "You move the room." },
+  { id: "elite",     name: "Elite",      min: 1550, blurb: "Hard to rattle." },
+  { id: "master",    name: "Master",     min: 1700, blurb: "Master of the room." },
+];
+
+// Pressure level → rating stakes multiplier (higher pressure = bigger swings)
+export const PRESSURE_STAKES: Record<string, number> = {
+  coaching: 0.6,
+  realistic: 1.0,
+  aggressive: 1.35,
+  brutal: 1.7,
+};

@@ -1,565 +1,490 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mic, MicOff, Square, Volume2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SessionHUD } from "@/components/SessionHUD";
+import { Mic, MicOff, Square, Zap, Loader2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { OpponentPresence } from "@/components/OpponentPresence";
 import {
   PERSONAS,
   PRESSURE_LEVELS,
+  SCENARIOS,
   createInitialCognitiveState,
-  MAX_TURNS,
 } from "@/lib/constants";
-import { generatePersonaResponse } from "@/services/gemini";
-import {
-  startListening,
-  stopListening,
-  speak,
-  stopSpeaking,
-} from "@/services/speech";
-import {
-  checkForInterruption,
-  calculateWpm,
-  countBuzzwords,
-  countFillers,
-} from "@/services/interruption-engine";
+import { LiveSession } from "@/services/live-session";
+import { countFillers, countBuzzwords } from "@/services/interruption-engine";
 import { saveCurrentSession } from "@/services/storage";
 import type {
   SessionSetup,
-  CognitiveState,
   ConversationTurn,
-  InterruptionEvent,
-  SessionStatus,
   SessionRecord,
 } from "@/types";
+
+type ArenaStatus = "ready" | "connecting" | "live" | "ended" | "error";
 
 export default function SessionPage() {
   const navigate = useNavigate();
 
-  // Session state
   const [setup, setSetup] = useState<SessionSetup | null>(null);
-  const [cognitiveState, setCognitiveState] = useState<CognitiveState | null>(null);
-  const [transcript, setTranscript] = useState<ConversationTurn[]>([]);
-  const [interruptions, setInterruptions] = useState<InterruptionEvent[]>([]);
-  const [status, setStatus] = useState<SessionStatus>("idle");
-  const [currentTranscript, setCurrentTranscript] = useState("");
-  const [sessionId] = useState(`session_${Date.now()}`);
-  const [startTime] = useState(Date.now());
+  const [status, setStatus] = useState<ArenaStatus>("ready");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [personaSpeaking, setPersonaSpeaking] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [bargeFlash, setBargeFlash] = useState(false);
 
-  // HUD metrics (cumulative for current session)
-  const [liveWpm, setLiveWpm] = useState(0);
-  const [totalFillers, setTotalFillers] = useState(0);
-  const [totalBuzzwords, setTotalBuzzwords] = useState(0);
+  // Live transcript surfacing
+  const [personaLine, setPersonaLine] = useState("");
+  const [userLine, setUserLine] = useState("");
+  const [turnCount, setTurnCount] = useState(0);
 
-  // Refs for mutable state in callbacks
-  const turnStartRef = useRef<number>(Date.now());
-  const turnTextRef = useRef<string>("");
+  // Refs
+  const sessionRef = useRef<LiveSession | null>(null);
+  const startTimeRef = useRef<number>(Date.now());
+  const sessionIdRef = useRef<string>(`session_${Date.now()}`);
+  const bargeCountRef = useRef(0);
+  const endedRef = useRef(false);
+
+  // Transcript assembly: fragments arrive by role; flush on role switch.
   const transcriptRef = useRef<ConversationTurn[]>([]);
-  const stateRef = useRef<CognitiveState | null>(null);
-  const statusRef = useRef<SessionStatus>("idle");
+  const pendingRef = useRef<{ role: "user" | "persona"; text: string } | null>(null);
+  const personaBufRef = useRef("");
+  const userBufRef = useRef("");
+  const levelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [inputLevel, setInputLevel] = useState(0);
 
-  // Keep refs in sync
-  useEffect(() => {
-    transcriptRef.current = transcript;
-  }, [transcript]);
-  useEffect(() => {
-    stateRef.current = cognitiveState;
-  }, [cognitiveState]);
-  useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
-
-  // Transcript auto-scroll
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript, currentTranscript]);
-
-  // ---- Initialize session ----
+  // ---- Load setup ----
   useEffect(() => {
     const raw = sessionStorage.getItem("pitchforge_setup");
-    if (!raw) {
-      navigate("/setup");
-      return;
-    }
-
-    const sessionSetup = JSON.parse(raw) as SessionSetup;
-    setSetup(sessionSetup);
-
-    const pressure = PRESSURE_LEVELS.find(
-      (p) => p.id === sessionSetup.pressureLevel
-    )!;
-    const initialState = createInitialCognitiveState(pressure);
-    setCognitiveState(initialState);
-
-    getPersonaOpening(sessionSetup, initialState);
-  }, []);
-
-  // ---- Persona opening ----
-  const getPersonaOpening = async (
-    setup: SessionSetup,
-    state: CognitiveState
-  ) => {
-    setStatus("processing");
-    try {
-      const response = await generatePersonaResponse(setup, state, []);
-      const turn: ConversationTurn = {
-        id: 1,
-        role: "persona",
-        content: response.reply,
-        timestamp: Date.now(),
-      };
-      setTranscript([turn]);
-      setCognitiveState(response.updatedState);
-
-      // Track agent opening response with Pendo
-      if (typeof pendo !== "undefined") {
-        pendo.trackAgent("agent_response", {
-          agentId: "jZ6Xh31H-eipqCjJOGgxKwDzGBY",
-          conversationId: sessionId,
-          messageId: `agent_response_${turn.id}_${Date.now()}`,
-          content: response.reply,
-          modelUsed: "gemini-2.0-flash",
-        });
-      }
-
-      setStatus("persona-speaking");
-
-      (window as any).pendo?.track("practice_session_started", {
-        scenario: setup.scenario,
-        persona: setup.persona,
-        pressureLevel: setup.pressureLevel,
-        sessionId: sessionId,
-      });
-
-      speak(response.reply, setup.persona, () => {
-        setStatus("idle");
-      });
-    } catch (error) {
-      console.error("Failed to get persona opening:", error);
-
-      (window as any).pendo?.track("persona_response_failed", {
-        sessionId,
-        turnNumber: 1,
-        isOpeningGreeting: true,
-        errorMessage: String(error).substring(0, 200),
-        scenario: setup.scenario,
-        persona: setup.persona,
-      });
-
-      const persona = PERSONAS[setup.persona];
-      const fallback = `Hello. I'm ${persona.name}. You have my attention. Go ahead.`;
-      const turn: ConversationTurn = {
-        id: 1,
-        role: "persona",
-        content: fallback,
-        timestamp: Date.now(),
-      };
-      setTranscript([turn]);
-      setStatus("persona-speaking");
-      speak(fallback, setup.persona, () => setStatus("idle"));
-    }
-  };
-
-  // ---- Start listening ----
-  const handleStartListening = useCallback(() => {
-    if (!setup || status === "processing" || status === "persona-speaking")
-      return;
-
-    setStatus("listening");
-    turnStartRef.current = Date.now();
-    turnTextRef.current = "";
-    setCurrentTranscript("");
-
-    startListening({
-      onResult: (text, isFinal) => {
-        if (isFinal) {
-          turnTextRef.current += " " + text;
-          setCurrentTranscript(turnTextRef.current.trim());
-        } else {
-          setCurrentTranscript(turnTextRef.current + " " + text);
-        }
-
-        // Update live WPM for HUD
-        const elapsed = Date.now() - turnStartRef.current;
-        if (elapsed > 2000) {
-          const currentWpm = calculateWpm(turnTextRef.current, elapsed);
-          setLiveWpm(currentWpm);
-        }
-      },
-      onSilence: () => {
-        if (
-          statusRef.current === "listening" &&
-          turnTextRef.current.trim().length > 0
-        ) {
-          handleUserTurnComplete();
-        }
-      },
-      onEnd: () => {
-        if (
-          statusRef.current === "listening" &&
-          turnTextRef.current.trim().length > 0
-        ) {
-          handleUserTurnComplete();
-        }
-      },
-      onError: (error) => {
-        console.error("Speech error:", error);
-        (window as any).pendo?.track("speech_recognition_error", {
-          sessionId,
-          errorType: typeof error === "object" && error !== null ? (error as any).error || "unknown" : "unknown",
-          errorMessage: String(error).substring(0, 200),
-          turnNumber: Math.ceil((transcriptRef.current?.length || 0) / 2) + 1,
-          browserUserAgent: navigator.userAgent.substring(0, 200),
-        });
-      },
-    });
-  }, [setup, status]);
-
-  // ---- Stop listening ----
-  const handleStopListening = useCallback(() => {
-    stopListening();
-    if (turnTextRef.current.trim().length > 0) {
-      handleUserTurnComplete();
-    } else {
-      setStatus("idle");
-    }
-  }, []);
-
-  // ---- Process completed user turn ----
-  const handleUserTurnComplete = async () => {
-    stopListening();
-    const text = turnTextRef.current.trim();
-    if (!text || !setup || !stateRef.current) return;
-
-    const duration = Date.now() - turnStartRef.current;
-    const wpm = calculateWpm(text, duration);
-    const fillerCount = countFillers(text);
-    const buzzwordCount = countBuzzwords(text);
-
-    // Update HUD totals
-    setLiveWpm(wpm);
-    setTotalFillers((prev) => prev + fillerCount);
-    setTotalBuzzwords((prev) => prev + buzzwordCount);
-
-    const turnId = transcriptRef.current.length + 1;
-    const userTurn: ConversationTurn = {
-      id: turnId,
-      role: "user",
-      content: text,
-      timestamp: Date.now(),
-      metadata: {
-        wpm,
-        fillerCount,
-        buzzwordCount,
-        duration: duration / 1000,
-      },
+    if (!raw) return;
+    setSetup(JSON.parse(raw) as SessionSetup);
+    return () => {
+      sessionRef.current?.stop();
+      if (levelTimerRef.current) clearInterval(levelTimerRef.current);
     };
+  }, []);
 
-    (window as any).pendo?.track("user_turn_completed", {
-      sessionId,
-      turnId,
-      wpm,
-      fillerCount,
-      buzzwordCount,
-      turnDurationSeconds: Math.round(duration / 1000),
-      wordCount: text.split(/\s+/).length,
-      scenario: setup.scenario,
-      persona: setup.persona,
+  // ---- Transcript helpers ----
+  const flushPending = useCallback(() => {
+    const p = pendingRef.current;
+    if (p && p.text.trim()) {
+      const id = transcriptRef.current.length + 1;
+      transcriptRef.current = [
+        ...transcriptRef.current,
+        { id, role: p.role, content: p.text.trim(), timestamp: Date.now() },
+      ];
+    }
+    pendingRef.current = null;
+  }, []);
+
+  const appendFragment = useCallback(
+    (role: "user" | "persona", text: string) => {
+      if (!text) return;
+      const p = pendingRef.current;
+      if (p && p.role !== role) flushPending();
+      if (!pendingRef.current) pendingRef.current = { role, text: "" };
+      pendingRef.current.text += text;
+    },
+    [flushPending]
+  );
+
+  // ---- Start the live session ----
+  const beginSession = useCallback(async () => {
+    if (!setup) return;
+    setStatus("connecting");
+    setErrorMsg(null);
+    startTimeRef.current = Date.now();
+
+    const session = new LiveSession(setup, {
+      onOpen: () => {
+        setStatus("live");
+        // poll input level for the mic meter
+        levelTimerRef.current = setInterval(() => {
+          setInputLevel(sessionRef.current?.getInputLevel() ?? 0);
+        }, 120);
+      },
+      onUserText: (t) => {
+        // a new user fragment means the persona's turn (if any) is over
+        if (personaBufRef.current) {
+          setPersonaLine(personaBufRef.current);
+          personaBufRef.current = "";
+        }
+        userBufRef.current += t;
+        setUserLine(userBufRef.current);
+        appendFragment("user", t);
+      },
+      onPersonaText: (t) => {
+        if (userBufRef.current) {
+          userBufRef.current = "";
+        }
+        personaBufRef.current += t;
+        setPersonaLine(personaBufRef.current);
+        appendFragment("persona", t);
+      },
+      onPersonaSpeakingStart: () => {
+        setPersonaSpeaking(true);
+        setUserLine("");
+      },
+      onPersonaSpeakingEnd: () => setPersonaSpeaking(false),
+      onInterrupted: () => {
+        bargeCountRef.current += 1;
+        setBargeFlash(true);
+        setTimeout(() => setBargeFlash(false), 1400);
+      },
+      onTurnComplete: () => {
+        setTurnCount((c) => c + 1);
+        // lock in whatever the persona just said as the standing line
+        if (personaBufRef.current) {
+          setPersonaLine(personaBufRef.current);
+        }
+      },
+      onError: (msg) => {
+        console.error("Live error:", msg);
+        setErrorMsg(msg);
+        setStatus("error");
+      },
+      onClose: () => {
+        if (!endedRef.current) {
+          // unexpected close
+        }
+      },
     });
 
-    setTranscript((prev) => [...prev, userTurn]);
-    setCurrentTranscript("");
-    setStatus("processing");
-
-    // Track user prompt with Pendo
-    if (typeof pendo !== "undefined") {
-      pendo.trackAgent("prompt", {
-        agentId: "jZ6Xh31H-eipqCjJOGgxKwDzGBY",
-        conversationId: sessionId,
-        messageId: `prompt_${turnId}_${Date.now()}`,
-        content: text,
-      });
-    }
-
-    // Check for interruption
-    const interruption = checkForInterruption(
-      text,
-      duration,
-      wpm,
-      stateRef.current
-    );
-    if (
-      interruption.shouldInterrupt &&
-      interruption.reason &&
-      interruption.message
-    ) {
-      (window as any).pendo?.track("interruption_triggered", {
-        sessionId,
-        turnId,
-        interruptionReason: interruption.reason,
-        scenario: setup.scenario,
-        persona: setup.persona,
-        pressureLevel: setup.pressureLevel,
-      });
-
-      setInterruptions((prev) => [
-        ...prev,
-        { reason: interruption.reason!, turnId, timestamp: Date.now() },
-      ]);
-    }
-
-    // Check max turns
-    const updatedTranscript = [...transcriptRef.current, userTurn];
-    if (updatedTranscript.length >= MAX_TURNS * 2) {
-      handleEndSession(updatedTranscript, stateRef.current);
-      return;
-    }
-
-    // Get persona response
+    sessionRef.current = session;
     try {
-      const response = await generatePersonaResponse(
-        setup,
-        stateRef.current,
-        updatedTranscript
+      await session.start();
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(
+        err?.name === "NotAllowedError"
+          ? "Microphone access was blocked. Allow the mic and try again."
+          : err?.message ?? "Could not start the live session."
       );
-
-      const personaTurn: ConversationTurn = {
-        id: turnId + 1,
-        role: "persona",
-        content: response.reply,
-        timestamp: Date.now(),
-        metadata: { interrupted: interruption.shouldInterrupt },
-      };
-
-      setTranscript((prev) => [...prev, personaTurn]);
-      setCognitiveState(response.updatedState);
-
-      // Track agent response with Pendo
-      if (typeof pendo !== "undefined") {
-        pendo.trackAgent("agent_response", {
-          agentId: "jZ6Xh31H-eipqCjJOGgxKwDzGBY",
-          conversationId: sessionId,
-          messageId: `agent_response_${personaTurn.id}_${Date.now()}`,
-          content: response.reply,
-          modelUsed: "gemini-2.0-flash",
-        });
-      }
-
-      if (response.shouldEnd) {
-        setStatus("persona-speaking");
-        speak(response.reply, setup.persona, () => {
-          handleEndSession(
-            [...updatedTranscript, personaTurn],
-            response.updatedState
-          );
-        });
-      } else {
-        setStatus("persona-speaking");
-        speak(response.reply, setup.persona, () => {
-          setStatus("idle");
-        });
-      }
-    } catch (error) {
-      console.error("LLM error:", error);
-      (window as any).pendo?.track("persona_response_failed", {
-        sessionId,
-        turnNumber: turnId + 1,
-        isOpeningGreeting: false,
-        errorMessage: String(error).substring(0, 200),
-        scenario: setup.scenario,
-        persona: setup.persona,
-      });
-      setStatus("idle");
+      setStatus("error");
     }
-  };
+  }, [setup, appendFragment]);
 
-  // ---- End session ----
-  const handleEndSession = (
-    finalTranscript: ConversationTurn[],
-    finalState: CognitiveState
-  ) => {
-    stopListening();
-    stopSpeaking();
+  // ---- Mute toggle ----
+  const toggleMute = useCallback(() => {
+    const next = !muted;
+    setMuted(next);
+    sessionRef.current?.setMuted(next);
+  }, [muted]);
+
+  // ---- End + go to feedback ----
+  const handleEnd = useCallback(() => {
+    if (endedRef.current || !setup) return;
+    endedRef.current = true;
+
+    flushPending();
+    if (levelTimerRef.current) clearInterval(levelTimerRef.current);
+    sessionRef.current?.stop();
     setStatus("ended");
 
+    const transcript = transcriptRef.current;
+    const pressure = PRESSURE_LEVELS.find((p) => p.id === setup.pressureLevel)!;
+    const finalState = createInitialCognitiveState(pressure);
+    finalState.stateMetrics.currentTurnCount = transcript.filter((t) => t.role === "user").length;
+
     const record: SessionRecord = {
-      id: sessionId,
-      setup: setup!,
+      id: sessionIdRef.current,
+      setup,
       cognitiveState: finalState,
-      transcript: finalTranscript,
+      transcript,
       feedback: null,
-      interruptions,
-      startedAt: startTime,
+      interruptions: [],
+      startedAt: startTimeRef.current,
       endedAt: Date.now(),
     };
-
-    const userTurns = finalTranscript.filter((t) => t.role === "user");
-    (window as any).pendo?.track("practice_session_completed", {
-      sessionId,
-      scenario: setup!.scenario,
-      persona: setup!.persona,
-      pressureLevel: setup!.pressureLevel,
-      totalTurns: userTurns.length,
-      totalInterruptions: interruptions.length,
-      sessionDurationSeconds: Math.round((Date.now() - startTime) / 1000),
-      endReason: finalTranscript.length >= MAX_TURNS * 2 ? "max_turns" : "user_ended",
-    });
-
     saveCurrentSession(record);
+
+    // Real measured signals from the user's transcribed words.
+    const userText = transcript.filter((t) => t.role === "user").map((t) => t.content).join(" ");
+    const durationSec = (Date.now() - startTimeRef.current) / 1000;
+    const wordCount = userText.trim().split(/\s+/).filter(Boolean).length;
+    sessionStorage.setItem(
+      "pitchforge_measured",
+      JSON.stringify({
+        buzzwordCount: countBuzzwords(userText),
+        fillerCount: countFillers(userText),
+        averageWpm: durationSec > 0 ? Math.round(wordCount / (durationSec / 60)) : 0,
+        totalDuration: durationSec,
+        interruptionCount: bargeCountRef.current,
+      })
+    );
+
     navigate("/feedback");
-  };
+  }, [setup, flushPending, navigate]);
 
-  const handleForceEnd = () => {
-    if (cognitiveState) {
-      handleEndSession(transcript, cognitiveState);
-    }
-  };
+  // Safety cap: wrap up after a long exchange.
+  useEffect(() => {
+    if (status === "live" && turnCount >= 22) handleEnd();
+  }, [turnCount, status, handleEnd]);
 
-  // ---- Render ----
-  if (!setup) return null;
+  // ---- No setup ----
+  if (!setup) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-8">
+        <div className="space-y-4 text-center">
+          <p className="font-display text-lg font-semibold">No active engagement</p>
+          <p className="text-sm text-muted-foreground">Brief a session before entering the arena.</p>
+          <button
+            onClick={() => navigate("/setup")}
+            className="rounded-lg bg-primary px-5 py-2.5 font-display text-sm font-semibold text-primary-foreground cursor-pointer"
+          >
+            Go to briefing
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const persona = PERSONAS[setup.persona];
+  const scenarioLabel = SCENARIOS.find((s) => s.id === setup.scenario)?.name || setup.scenario;
+  const pressureLabel = PRESSURE_LEVELS.find((p) => p.id === setup.pressureLevel)?.name || "";
+  const userTurns = transcriptRef.current.filter((t) => t.role === "user").length;
 
+  // Pressure builds with the conversation (honest visual — no fake cognitive state in Live).
+  const threat = Math.max(0, Math.min(10, 3 + Math.floor(turnCount / 2) + (bargeFlash ? 2 : 0)));
+
+  const presenceState: "idle" | "listening" | "thinking" | "speaking" =
+    status === "connecting" ? "thinking"
+    : personaSpeaking ? "speaking"
+    : status === "live" ? "listening"
+    : "idle";
+
+  // ---- Pre-session gate ----
+  if (status === "ready" || status === "connecting" || status === "error") {
+    return (
+      <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden spotlight px-6">
+        <div className="arena-grid pointer-events-none absolute inset-0 opacity-40" />
+        <div className="vignette pointer-events-none absolute inset-0" />
+
+        <div className="relative z-10 flex flex-col items-center text-center">
+          <OpponentPresence
+            initial={persona.name.charAt(0)}
+            state={status === "connecting" ? "thinking" : "idle"}
+            threat={4}
+            size={150}
+          />
+          <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+            {scenarioLabel} · {pressureLabel} · live voice
+          </p>
+          <h1 className="mt-2 font-display text-3xl font-bold tracking-tight md:text-4xl">
+            You're about to face {persona.name}
+          </h1>
+          <p className="mt-2 max-w-md text-[14px] leading-relaxed text-muted-foreground">
+            {persona.archetype} This is a real-time voice conversation — they can
+            hear you, interrupt you, and push back. Speak naturally. Cut in when you need to.
+          </p>
+
+          {status === "error" && errorMsg && (
+            <div className="mt-5 flex items-center gap-2 rounded-lg border border-deny/40 bg-deny/10 px-4 py-2.5">
+              <AlertTriangle className="h-4 w-4 text-deny" />
+              <span className="text-[13px] text-deny">{errorMsg}</span>
+            </div>
+          )}
+
+          {status === "connecting" ? (
+            <div className="mt-9 flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="font-mono text-[12px] uppercase tracking-wider">Connecting…</span>
+            </div>
+          ) : (
+            <button
+              onClick={beginSession}
+              className="group mt-9 inline-flex items-center gap-3 rounded-full bg-primary px-7 py-3.5 font-display text-[15px] font-semibold text-primary-foreground transition-all hover:gap-4 cursor-pointer"
+            >
+              <Mic className="h-4 w-4" />
+              {status === "error" ? "Try again" : "Begin — allow your mic"}
+            </button>
+          )}
+
+          <button
+            onClick={() => navigate("/setup")}
+            className="mt-4 font-mono text-[11px] uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-foreground cursor-pointer"
+          >
+            Back to briefing
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Live arena ----
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div
+      className={cn(
+        "relative min-h-screen overflow-hidden arena-enter",
+        threat >= 7 ? "spotlight-deny" : "spotlight"
+      )}
+    >
+      <div className="arena-grid pointer-events-none absolute inset-0 opacity-40" />
+      <div className="vignette pointer-events-none absolute inset-0" />
+
       {/* Top bar */}
-      <header className="flex items-center justify-between p-4 border-b border-border">
+      <header className="relative z-20 flex items-center justify-between px-5 py-4 md:px-8">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            <span className="text-xs font-bold text-primary">
-              {persona.name.charAt(0)}
-            </span>
-          </div>
-          <div>
-            <p className="text-sm font-medium">{persona.name}</p>
-            <p className="text-xs text-muted-foreground">{persona.title}</p>
-          </div>
+          <span className="flex items-center gap-1.5 rounded-full border border-deny/40 bg-deny/10 px-2.5 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-deny live-pulse" />
+            <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-deny">Live</span>
+          </span>
+          <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            {scenarioLabel} · {pressureLabel}
+          </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            Turn {Math.ceil(transcript.length / 2)}/{MAX_TURNS}
-          </span>
-          <Button variant="destructive" size="sm" onClick={handleForceEnd}>
-            <Square className="w-3 h-3 mr-1" />
+        <div className="flex items-center gap-5">
+          <div className="text-right">
+            <p className="font-mono text-sm font-bold leading-none">{userTurns}</p>
+            <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Exchanges</p>
+          </div>
+          <button
+            onClick={handleEnd}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-deny/50 hover:text-deny cursor-pointer"
+          >
+            <Square className="h-3 w-3" />
             End
-          </Button>
+          </button>
         </div>
       </header>
 
-      {/* Real-Time HUD — Phase 2 */}
-      <div className="px-4 pt-3">
-        <SessionHUD
-          wpm={liveWpm}
-          fillerCount={totalFillers}
-          buzzwordCount={totalBuzzwords}
-          cognitiveState={cognitiveState}
-          isListening={status === "listening"}
+      {/* Pressure meter */}
+      <div className="relative z-20 px-5 md:px-8">
+        <ThreatMeter threat={threat} />
+      </div>
+
+      {/* Stage */}
+      <div className="relative z-10 flex flex-col items-center px-6 pt-6 pb-44 md:pt-10">
+        <OpponentPresence
+          initial={persona.name.charAt(0)}
+          state={presenceState}
+          threat={threat}
+          size={150}
         />
-      </div>
+        <p className="mt-4 font-display text-lg font-semibold tracking-tight">{persona.name}</p>
+        <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+          {persona.title}
+        </p>
 
-      {/* Conversation transcript */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {transcript.map((turn) => (
-          <div
-            key={turn.id}
-            className={cn(
-              "max-w-[85%] rounded-lg p-3",
-              turn.role === "user"
-                ? "ml-auto bg-primary/10 text-foreground"
-                : "mr-auto bg-card border border-border"
-            )}
-          >
-            <p className="text-xs text-muted-foreground mb-1">
-              {turn.role === "user" ? "You" : persona.name}
-            </p>
-            <p className="text-sm">{turn.content}</p>
-            {turn.metadata?.interrupted && (
-              <p className="text-xs text-orange-400 mt-1">⚡ Interrupted</p>
-            )}
-          </div>
-        ))}
-
-        {/* Current interim transcript */}
-        {currentTranscript && status === "listening" && (
-          <div className="max-w-[85%] ml-auto rounded-lg p-3 bg-primary/5 border border-primary/20">
-            <p className="text-xs text-muted-foreground mb-1">
-              You (speaking...)
-            </p>
-            <p className="text-sm text-foreground/70">{currentTranscript}</p>
-          </div>
-        )}
-
-        {/* Processing indicator */}
-        {status === "processing" && (
-          <div className="max-w-[85%] mr-auto rounded-lg p-3 bg-card border border-border">
-            <div className="flex gap-1">
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="w-1.5 h-1.5 rounded-full bg-primary"
-                  style={{
-                    animation: `pulseDot 1s ease-in-out ${i * 0.2}s infinite`,
-                  }}
-                />
-              ))}
+        {/* Persona's line */}
+        <div className="mt-8 min-h-[120px] w-full max-w-2xl text-center">
+          {bargeFlash ? (
+            <div className="jolt">
+              <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-threat/50 bg-threat/10 px-3 py-1">
+                <Zap className="h-3 w-3 text-threat" />
+                <span className="font-mono text-[10px] uppercase tracking-wider text-threat">
+                  You cut in
+                </span>
+              </div>
+              <p className="font-display text-xl font-medium leading-snug tracking-tight text-foreground/60 md:text-2xl">
+                {personaLine}
+              </p>
             </div>
-          </div>
-        )}
-
-        <div ref={transcriptEndRef} />
-      </div>
-
-      {/* Bottom control bar */}
-      <div className="border-t border-border p-4">
-        <div className="flex items-center justify-center gap-4">
-          {status === "persona-speaking" && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Volume2 className="w-4 h-4 animate-pulse text-primary" />
-              <span>{persona.name} is speaking...</span>
-            </div>
-          )}
-
-          {(status === "idle" || status === "listening") && (
-            <>
-              {status === "idle" ? (
-                <Button
-                  onClick={handleStartListening}
-                  size="lg"
-                  className="w-16 h-16 rounded-full relative"
-                >
-                  <Mic className="w-6 h-6" />
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleStopListening}
-                  size="lg"
-                  variant="destructive"
-                  className="w-16 h-16 rounded-full animate-pulse"
-                >
-                  <MicOff className="w-6 h-6" />
-                </Button>
-              )}
-            </>
-          )}
-
-          {status === "processing" && (
-            <p className="text-sm text-muted-foreground">Thinking...</p>
+          ) : personaLine ? (
+            <p className="page-enter font-display text-2xl font-medium leading-snug tracking-tight text-foreground md:text-[28px]">
+              {personaLine}
+            </p>
+          ) : (
+            <p className="font-mono text-sm text-muted-foreground">
+              {personaSpeaking ? "…" : "Opponent is sizing you up…"}
+            </p>
           )}
         </div>
 
-        {status === "idle" && (
-          <p className="text-center text-xs text-muted-foreground mt-2">
-            Tap the mic to speak
-          </p>
-        )}
-        {status === "listening" && (
-          <p className="text-center text-xs text-muted-foreground mt-2">
-            Listening... tap to stop
-          </p>
+        {/* Your live words */}
+        {userLine && (
+          <div className="mt-6 w-full max-w-2xl">
+            <p className="text-center font-mono text-[10px] uppercase tracking-wider text-primary">You</p>
+            <p className="mt-2 text-center text-[15px] leading-relaxed text-foreground/70">{userLine}</p>
+          </div>
         )}
       </div>
+
+      {/* Mic dock — continuous in Live; button mutes */}
+      <div className="fixed inset-x-0 bottom-0 z-30 flex flex-col items-center pb-8 pt-6">
+        <LiveMic
+          muted={muted}
+          personaSpeaking={personaSpeaking}
+          level={inputLevel}
+          onToggle={toggleMute}
+        />
+        <p className="mt-3 font-mono text-[11px] text-muted-foreground">
+          {muted
+            ? "Muted — tap to speak"
+            : personaSpeaking
+              ? `${persona.name} is talking — cut in anytime`
+              : "Listening… just talk"}
+        </p>
+      </div>
     </div>
+  );
+}
+
+/* ---------------- Pressure meter ---------------- */
+
+function ThreatMeter({ threat }: { threat: number }) {
+  const label = threat <= 3 ? "Holding" : threat <= 6 ? "Pressed" : threat <= 8 ? "Hostile" : "Critical";
+  const color = threat <= 3 ? "text-confirm" : threat <= 6 ? "text-hold" : "text-deny";
+  return (
+    <div className="mx-auto flex max-w-2xl items-center gap-3">
+      <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Pressure</span>
+      <div className="flex h-1.5 flex-1 gap-0.5 overflow-hidden rounded-full">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <span
+            key={i}
+            className={cn(
+              "flex-1 rounded-full transition-colors duration-500",
+              i < threat
+                ? threat <= 3 ? "bg-confirm" : threat <= 6 ? "bg-hold" : "bg-deny"
+                : "bg-border"
+            )}
+          />
+        ))}
+      </div>
+      <span className={cn("w-16 text-right font-mono text-[11px] font-semibold", color)}>{label}</span>
+    </div>
+  );
+}
+
+/* ---------------- Live mic ---------------- */
+
+function LiveMic({
+  muted,
+  personaSpeaking,
+  level,
+  onToggle,
+}: {
+  muted: boolean;
+  personaSpeaking: boolean;
+  level: number;
+  onToggle: () => void;
+}) {
+  const ringScale = 1 + Math.min(0.5, level * 0.8);
+  if (muted) {
+    return (
+      <button
+        onClick={onToggle}
+        className="group relative flex h-20 w-20 items-center justify-center rounded-full bg-secondary text-muted-foreground transition-transform hover:scale-105 cursor-pointer"
+        aria-label="Unmute"
+      >
+        <MicOff className="h-7 w-7" />
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={onToggle}
+      className={cn(
+        "group relative flex h-20 w-20 items-center justify-center rounded-full transition-transform hover:scale-105 cursor-pointer",
+        personaSpeaking ? "bg-primary/80 text-primary-foreground" : "bg-primary text-primary-foreground"
+      )}
+      aria-label="Mute"
+    >
+      {/* live input ring */}
+      <span
+        className="absolute inset-0 rounded-full border border-primary/40 transition-transform duration-100"
+        style={{ transform: `scale(${ringScale})` }}
+      />
+      <span className="absolute -inset-2 rounded-full border border-primary/20 live-pulse" />
+      <Mic className="relative h-7 w-7" />
+    </button>
   );
 }
