@@ -14,6 +14,13 @@ export default function HistoryPage() {
   const profile = getProgressionProfile();
 
   const handleDelete = (id: string) => {
+    const session = sessions.find((s) => s.id === id);
+    (window as any).pendo?.track("session_deleted", {
+      sessionId: id,
+      scenario: session?.setup.scenario,
+      persona: session?.setup.persona,
+      verdict: session?.feedback?.verdict,
+    });
     deleteSession(id);
     window.location.reload();
   };
