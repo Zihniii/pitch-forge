@@ -10,7 +10,14 @@ import { startMicCapture, AudioPlayer, type MicCaptureHandle } from "./live-audi
 // ============================================================
 
 // Native-audio dialog model (free tier on AI Studio).
-const LIVE_MODEL = "gemini-2.0-flash-live-001";
+// Names differ across API versions and change often; we try these in order
+// and use whichever the connected key actually supports.
+const LIVE_MODEL_CANDIDATES = [
+  "gemini-live-2.5-flash-preview",
+  "gemini-2.5-flash-preview-native-audio-dialog",
+  "gemini-2.0-flash-live-001",
+  "gemini-2.0-flash-exp",
+];
 
 // Map each persona to a distinct Live prebuilt voice for character variety.
 // Live voices: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr.
@@ -108,6 +115,7 @@ export interface LiveCallbacks {
 
 export class LiveSession {
   private ai: GoogleGenAI;
+  private aiBeta: GoogleGenAI;
   private session: Session | null = null;
   private mic: MicCaptureHandle | null = null;
   private player: AudioPlayer;
@@ -120,7 +128,10 @@ export class LiveSession {
   constructor(setup: SessionSetup, cb: LiveCallbacks) {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) throw new Error("VITE_GEMINI_API_KEY is not set");
-    this.ai = new GoogleGenAI({ apiKey });
+    // Live preview models are served on the v1alpha API version; the SDK
+    // defaults to v1beta (which is why bidiGenerateContent was "not found").
+    this.ai = new GoogleGenAI({ apiKey, apiVersion: "v1alpha" });
+    this.aiBeta = new GoogleGenAI({ apiKey, apiVersion: "v1beta" });
     this.setup = setup;
     this.cb = cb;
     this.player = new AudioPlayer();
@@ -137,43 +148,130 @@ export class LiveSession {
   async start(): Promise<void> {
     await this.player.resume();
 
-    this.session = await this.ai.live.connect({
-      model: LIVE_MODEL,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        systemInstruction: buildSystemInstruction(this.setup),
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voiceFor(this.setup.persona) },
-          },
-        },
-        // Keep text transcripts of both sides for the feedback engine.
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-      },
-      callbacks: {
-        onopen: () => {
-          this.cb.onOpen();
-          // Nudge the persona to open the conversation.
-          this.session?.sendClientContent({
-            turns: [{ role: "user", parts: [{ text: "[The candidate has just sat down. Begin the conversation now — greet them and hit them with your opening challenge.]" }] }],
-            turnComplete: true,
+    // 1) Request mic FIRST so a permission failure surfaces clearly before connecting.
+    try {
+      this.mic = await startMicCapture((b64) => {
+        if (this.closed || this.muted || !this.session) return;
+        try {
+          this.session.sendRealtimeInput({
+            audio: { data: b64, mimeType: "audio/pcm;rate=16000" },
           });
-        },
-        onmessage: (msg: any) => this.handleMessage(msg),
-        onerror: (e: any) => this.cb.onError(e?.message ?? "Live connection error"),
-        onclose: () => {
-          this.cb.onClose();
-        },
-      },
-    });
-
-    // Begin streaming mic audio upstream.
-    this.mic = await startMicCapture((b64) => {
-      if (this.closed || this.muted || !this.session) return;
-      this.session.sendRealtimeInput({
-        audio: { data: b64, mimeType: "audio/pcm;rate=16000" },
+        } catch {
+          /* socket may be momentarily closed during reconnection */
+        }
       });
+      console.log("[Live] mic capture started");
+    } catch (e: any) {
+      console.error("[Live] mic capture failed:", e);
+      throw e;
+    }
+
+    // 2) Try each (apiVersion × model) combo until one connects.
+    const attempts: { label: string; client: GoogleGenAI; model: string }[] = [];
+    for (const model of LIVE_MODEL_CANDIDATES) {
+      attempts.push({ label: `v1alpha/${model}`, client: this.ai, model });
+    }
+    for (const model of LIVE_MODEL_CANDIDATES) {
+      attempts.push({ label: `v1beta/${model}`, client: this.aiBeta, model });
+    }
+
+    let lastErr = "";
+    for (const a of attempts) {
+      try {
+        console.log("[Live] trying:", a.label);
+        await this.connectModel(a.client, a.model);
+        console.log("[Live] connected:", a.label);
+        return; // success
+      } catch (e: any) {
+        lastErr = e?.message ?? String(e);
+        console.warn(`[Live] ${a.label} failed: ${lastErr}`);
+      }
+    }
+    throw new Error(
+      `Live API unavailable on this key (tried v1alpha + v1beta). Last error: ${lastErr}`
+    );
+  }
+
+  /**
+   * Connect to a single model on a given client. Resolves once the session is
+   * confirmed open (setupComplete). Rejects if the socket closes early
+   * (e.g. "model not found"), so the caller can try the next combo.
+   */
+  private connectModel(client: GoogleGenAI, model: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const ok = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
+      const fail = (msg: string) => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(msg));
+        }
+      };
+
+      client.live
+        .connect({
+          model,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            systemInstruction: buildSystemInstruction(this.setup),
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: voiceFor(this.setup.persona) },
+              },
+            },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+          },
+          callbacks: {
+            onopen: () => {
+              console.log("[Live] socket open for", model);
+            },
+            onmessage: (msg: any) => {
+              // First real message (setupComplete) confirms the model is valid.
+              if (msg?.setupComplete && !settled) {
+                ok();
+                this.cb.onOpen();
+                try {
+                  this.session?.sendClientContent({
+                    turns: "Begin now. Greet me briefly in character and hit me with your opening challenge.",
+                    turnComplete: true,
+                  });
+                } catch (e) {
+                  console.error("[Live] opening nudge failed:", e);
+                }
+              }
+              try {
+                this.handleMessage(msg);
+              } catch (e) {
+                console.error("[Live] handleMessage error:", e);
+              }
+            },
+            onerror: (e: any) => {
+              const m = e?.message ?? "Live connection error";
+              if (!settled) fail(m);
+              else this.cb.onError(m);
+            },
+            onclose: (e: any) => {
+              const reason = e?.reason ?? "";
+              console.log("[Live] connection closed:", reason);
+              // Early close before confirmation = this model is unusable.
+              if (!settled) {
+                fail(reason || "Connection closed before setup");
+              } else {
+                this.cb.onClose();
+              }
+            },
+          },
+        })
+        .then((session) => {
+          this.session = session;
+        })
+        .catch((e: any) => fail(e?.message ?? String(e)));
     });
   }
 
@@ -182,7 +280,9 @@ export class LiveSession {
   }
 
   private handleMessage(msg: any) {
+    if (msg?.setupComplete) console.log("[Live] setupComplete");
     const sc = msg.serverContent;
+    if (!sc) return;
 
     // Barge-in: model was cut off because the user started talking.
     if (sc?.interrupted) {

@@ -111,6 +111,7 @@ export default function HomePage() {
 function FirstRun({ onEnter }: { onEnter: () => void }) {
   return (
     <div className="page-enter flex min-h-[70vh] flex-col items-center justify-center text-center">
+      <Logo size={56} className="mb-6" />
       <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1">
         <span className="h-1.5 w-1.5 rounded-full bg-primary live-pulse" />
         <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">

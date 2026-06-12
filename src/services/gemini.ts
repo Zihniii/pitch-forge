@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import type {
   CognitiveState,
   ConversationTurn,
@@ -7,30 +6,10 @@ import type {
   SessionFeedback,
 } from "@/types";
 import { PERSONAS, PRESSURE_LEVELS, SCENARIOS } from "@/lib/constants";
+import { generateJSON, RateLimitError } from "./llm";
 
-// ============================================================
-// Gemini Client
-// ============================================================
-
-function getGenAI() {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("VITE_GEMINI_API_KEY is not set in environment variables");
-  }
-  return new GoogleGenerativeAI(apiKey);
-}
-
-function getModel(temperature: number) {
-  return getGenAI().getGenerativeModel({
-    model: "gemini-2.0-flash",
-    generationConfig: {
-      temperature,
-      topP: 0.95,
-      // JSON mode keeps responses parseable — no markdown fences, no prose leakage.
-      responseMimeType: "application/json",
-    },
-  });
-}
+// Re-export so existing imports keep working.
+export { RateLimitError };
 
 // ============================================================
 // Turn signals — REAL measured behavior, fed to the persona
@@ -334,13 +313,11 @@ export async function generatePersonaResponse(input: PersonaTurnInput): Promise<
   const pressure = PRESSURE_LEVELS.find((p) => p.id === input.setup.pressureLevel)!;
   // A touch more temperature for warm/expressive personas, less for clipped analytical ones.
   const temp = input.interruption ? 0.95 : 0.85;
-  const model = getModel(temp);
 
   const prompt = buildPersonaPrompt(input);
 
   try {
-    const result = await model.generateContent(prompt);
-    const raw = result.response.text().trim();
+    const raw = await generateJSON(prompt, temp, "fast");
     const out = parseJSON<LLMTurnOutput>(raw);
 
     if (!out || typeof out.reply !== "string" || !out.reply.trim()) {
@@ -376,8 +353,12 @@ export async function generatePersonaResponse(input: PersonaTurnInput): Promise<
       questionAsked: out.questionAsked?.trim() || null,
       emotion: read.emotion ?? "neutral",
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error("Persona turn failed:", err);
+    // Rate-limit errors are already typed by the LLM layer — re-throw so the UI
+    // shows a clear message instead of looping canned lines.
+    if (err instanceof RateLimitError || err?.name === "RateLimitError") throw err;
+    // Other transient errors: a single in-character fallback is acceptable.
     return fallbackTurn(input, persona, pressure.multiplier);
   }
 }
@@ -461,7 +442,6 @@ export async function generateSessionFeedback(
   finalState: CognitiveState,
   measured: FeedbackInputs
 ): Promise<SessionFeedback> {
-  const model = getModel(0.6);
   const persona = PERSONAS[setup.persona];
 
   const userTurns = transcript.filter((t) => t.role === "user");
@@ -519,8 +499,7 @@ Return ONLY this JSON (no markdown):
   ]
 }`;
 
-  const result = await model.generateContent(prompt);
-  const raw = result.response.text().trim();
+  const raw = await generateJSON(prompt, 0.6, "quality", { retries: 3 });
   const parsed = parseJSON<SessionFeedback>(raw);
   if (!parsed) throw new Error("Could not parse feedback");
 

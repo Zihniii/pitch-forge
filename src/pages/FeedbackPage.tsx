@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Trophy,
   AlertTriangle,
@@ -7,6 +7,7 @@ import {
   Share2,
   RotateCcw,
   ArrowRight,
+  ArrowLeft,
   Home,
   TrendingUp,
   TrendingDown,
@@ -17,9 +18,10 @@ import {
   getCurrentSession,
   saveSession,
   clearCurrentSession,
+  getSession,
 } from "@/services/storage";
 import { generateSessionFeedback } from "@/services/gemini";
-import { deltaForLatest, rankForRating, getProgressionProfile } from "@/services/progression";
+import { deltaForLatest, rankForRating, getProgressionProfile, sessionRatingDelta } from "@/services/progression";
 import { PERSONAS } from "@/lib/constants";
 import type { SessionFeedback, SessionRecord, ConversationTurn, Verdict, FeedbackMoment } from "@/types";
 
@@ -31,6 +33,8 @@ const VERDICT_COPY: Record<Verdict, { word: string; line: string; spotlight: str
 
 export default function FeedbackPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const reviewId = searchParams.get("review");
   const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,8 +43,23 @@ export default function FeedbackPage() {
   const [newRating, setNewRating] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const isReview = !!reviewId;
 
   useEffect(() => {
+    // Review mode: open a past record's stored verdict — no regeneration.
+    if (reviewId) {
+      const past = getSession(reviewId);
+      if (!past || !past.feedback) {
+        navigate("/history");
+        return;
+      }
+      setSession(past);
+      setFeedback(past.feedback);
+      setRatingDelta(sessionRatingDelta(past));
+      setRevealed(true); // skip the dramatic reveal when reviewing
+      setLoading(false);
+      return;
+    }
     const current = getCurrentSession();
     if (!current) {
       navigate("/");
@@ -53,6 +72,14 @@ export default function FeedbackPage() {
 
   const generateFeedback = async (s: SessionRecord) => {
     try {
+      const userTurns = s.transcript.filter((t) => t.role === "user");
+      // No real conversation happened — don't dead-end on an LLM call that will fail.
+      if (userTurns.length === 0) {
+        setError("empty");
+        setLoading(false);
+        return;
+      }
+
       const measuredRaw = sessionStorage.getItem("pitchforge_measured");
       const measured = measuredRaw
         ? JSON.parse(measuredRaw)
@@ -145,17 +172,44 @@ export default function FeedbackPage() {
   }
 
   if (error || !feedback) {
+    const isEmpty = error === "empty";
     return (
-      <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="space-y-4 text-center">
+      <div className="flex min-h-screen items-center justify-center p-6 spotlight">
+        <div className="max-w-sm space-y-4 text-center">
           <AlertTriangle className="mx-auto h-10 w-10 text-deny" />
-          <p className="text-muted-foreground">{error || "Something went wrong"}</p>
-          <button
-            onClick={() => navigate("/")}
-            className="rounded-lg bg-primary px-5 py-2.5 font-display text-sm font-semibold text-primary-foreground cursor-pointer"
-          >
-            Back to deck
-          </button>
+          <p className="font-display text-lg font-semibold tracking-tight">
+            {isEmpty ? "No exchange to score" : "Verdict lost in transmission"}
+          </p>
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            {isEmpty
+              ? "The conversation ended before you said anything the opponent could judge. Step back into the arena and speak — they're listening the moment you start."
+              : "Something dropped while the room was deciding. Your session is saved — try generating the verdict again."}
+          </p>
+          <div className="flex justify-center gap-3 pt-1">
+            {!isEmpty && session && (
+              <button
+                onClick={() => {
+                  setError(null);
+                  setLoading(true);
+                  generateFeedback(session);
+                }}
+                className="rounded-lg bg-primary px-5 py-2.5 font-display text-sm font-semibold text-primary-foreground cursor-pointer"
+              >
+                Retry verdict
+              </button>
+            )}
+            <button
+              onClick={() => navigate(isEmpty ? "/setup" : "/")}
+              className={cn(
+                "rounded-lg px-5 py-2.5 font-display text-sm font-semibold cursor-pointer",
+                isEmpty
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {isEmpty ? "Back to arena" : "Back to deck"}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -417,20 +471,41 @@ export default function FeedbackPage() {
 
         {/* Footer actions */}
         <div className="mt-10 flex gap-3">
-          <button
-            onClick={() => navigate("/setup")}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-display text-[14px] font-semibold text-primary-foreground cursor-pointer"
-          >
-            <RotateCcw className="h-4 w-4" />
-            New session
-          </button>
-          <button
-            onClick={() => navigate("/")}
-            className="flex items-center justify-center gap-2 rounded-lg border border-border px-5 py-3 text-[14px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
-          >
-            <Home className="h-4 w-4" />
-            Deck
-          </button>
+          {isReview ? (
+            <>
+              <button
+                onClick={() => navigate("/history")}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-display text-[14px] font-semibold text-primary-foreground cursor-pointer"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to record
+              </button>
+              <button
+                onClick={() => navigate("/setup")}
+                className="flex items-center justify-center gap-2 rounded-lg border border-border px-5 py-3 text-[14px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Run it back
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => navigate("/setup")}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-display text-[14px] font-semibold text-primary-foreground cursor-pointer"
+              >
+                <RotateCcw className="h-4 w-4" />
+                New session
+              </button>
+              <button
+                onClick={() => navigate("/")}
+                className="flex items-center justify-center gap-2 rounded-lg border border-border px-5 py-3 text-[14px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+              >
+                <Home className="h-4 w-4" />
+                Deck
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

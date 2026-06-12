@@ -62,7 +62,7 @@ export default function HistoryPage() {
         ) : (
           <div className="mt-8 space-y-2">
             {sessions.map((s) => (
-              <Row key={s.id} session={s} onDelete={() => handleDelete(s.id)} />
+              <Row key={s.id} session={s} onOpen={() => navigate(`/feedback?review=${s.id}`)} onDelete={() => handleDelete(s.id)} />
             ))}
           </div>
         )}
@@ -71,7 +71,7 @@ export default function HistoryPage() {
   );
 }
 
-function Row({ session, onDelete }: { session: SessionRecord; onDelete: () => void }) {
+function Row({ session, onOpen, onDelete }: { session: SessionRecord; onOpen: () => void; onDelete: () => void }) {
   const f = session.feedback!;
   const persona = PERSONAS[session.setup.persona];
   const scenario = SCENARIOS.find((sc) => sc.id === session.setup.scenario)?.name || session.setup.scenario;
@@ -85,7 +85,10 @@ function Row({ session, onDelete }: { session: SessionRecord; onDelete: () => vo
   }).format(new Date(session.endedAt || session.startedAt));
 
   return (
-    <div className="group flex items-center gap-4 rounded-xl border border-border bg-card/50 px-4 py-3.5 transition-colors hover:border-muted-foreground/30">
+    <button
+      onClick={onOpen}
+      className="group flex w-full items-center gap-4 rounded-xl border border-border bg-card/50 px-4 py-3.5 text-left transition-colors hover:border-primary/40 hover:bg-card/80 cursor-pointer"
+    >
       {/* Verdict chip */}
       <span
         className={cn(
@@ -118,14 +121,18 @@ function Row({ session, onDelete }: { session: SessionRecord; onDelete: () => vo
             {delta} CR
           </span>
         </div>
-        <button
-          onClick={onDelete}
+        <ArrowRight className="h-4 w-4 text-muted-foreground/40 transition-colors group-hover:text-primary" />
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onDelete(); } }}
           className="p-1.5 text-muted-foreground/50 transition-colors hover:text-deny cursor-pointer"
           aria-label="Delete session"
         >
           <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        </span>
       </div>
-    </div>
+    </button>
   );
 }
