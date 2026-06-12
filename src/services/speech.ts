@@ -45,6 +45,7 @@ export function startListening(callbacks: SpeechRecognitionCallbacks): boolean {
 
   recognition.onerror = (event) => {
     if (event.error !== "no-speech" && event.error !== "aborted") {
+      (window as any).pendo?.track("speech_recognition_error", { error: event.error });
       callbacks.onError(`Speech recognition error: ${event.error}`);
     }
   };

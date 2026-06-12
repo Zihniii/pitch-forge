@@ -110,6 +110,12 @@ export default function FeedbackPage() {
       });
     } catch (err) {
       console.error("Feedback generation failed:", err);
+      (window as any).pendo?.track("feedback_generation_failed", {
+        sessionId: s.id,
+        scenario: s.setup.scenario,
+        persona: s.setup.persona,
+        error: (err as Error)?.message || 'Unknown error',
+      });
       setError("The judge's verdict was lost in transmission. Try again.");
     } finally {
       setLoading(false);
@@ -122,6 +128,10 @@ export default function FeedbackPage() {
     const text = `PitchForge — ${feedback.verdict} · ${overall}/100${
       ratingDelta !== null ? ` (${ratingDelta >= 0 ? "+" : ""}${ratingDelta} CR)` : ""
     }\n${feedback.primaryReason}\n\n#EveryoneShipsNow`;
+    (window as any).pendo?.track("share_card_downloaded", {
+      verdict: feedback.verdict,
+      overallScore: overall,
+    });
     try {
       await navigator.clipboard.writeText(text);
       const { toast } = await import("sonner");

@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Flame, Crosshair, Target } from "lucide-react";
+import { Logo } from "@/components/Logo";
 import { getProgressionProfile } from "@/services/progression";
 import { PERSONAS } from "@/lib/constants";
 import { cn } from "@/lib/utils";

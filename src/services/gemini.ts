@@ -355,6 +355,12 @@ export async function generatePersonaResponse(input: PersonaTurnInput): Promise<
     };
   } catch (err: any) {
     console.error("Persona turn failed:", err);
+    (window as any).pendo?.track("persona_response_failed", {
+      scenario: input.setup.scenario,
+      persona: input.setup.persona,
+      turnNumber: input.transcript.length,
+      error: (err as Error)?.message || "Unknown error",
+    });
     // Rate-limit errors are already typed by the LLM layer — re-throw so the UI
     // shows a clear message instead of looping canned lines.
     if (err instanceof RateLimitError || err?.name === "RateLimitError") throw err;

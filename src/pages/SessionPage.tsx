@@ -161,6 +161,14 @@ export default function SessionPage() {
       onOpen: () => {
         setMode("live");
         setStatus("idle");
+        (window as any).pendo?.track("practice_session_started", {
+          sessionId,
+          scenario: setup.scenario,
+          persona: setup.persona,
+          pressureLevel: setup.pressureLevel,
+          engine: "live",
+        });
+        // poll input level for the mic meter
         levelTimerRef.current = setInterval(() => {
           setInputLevel(liveRef.current?.getInputLevel() ?? 0);
         }, 120);
@@ -181,6 +189,10 @@ export default function SessionPage() {
       onPersonaSpeakingEnd: () => setStatus("idle"),
       onInterrupted: () => {
         interruptionsRef.current = [...interruptionsRef.current, { reason: "rambling", turnId: transcriptRef.current.length, timestamp: Date.now() }];
+        (window as any).pendo?.track("interruption_triggered", {
+          sessionId,
+          interruptionCount: interruptionsRef.current.length,
+        });
         setInterruptFlash("You cut in");
         setTimeout(() => setInterruptFlash(null), 1400);
       },
@@ -405,6 +417,15 @@ export default function SessionPage() {
     saveCurrentSession(record);
 
     const agg = aggregateRef.current;
+    (window as any).pendo?.track("practice_session_completed", {
+      sessionId,
+      scenario: setup.scenario,
+      persona: setup.persona,
+      pressureLevel: setup.pressureLevel,
+      turnCount: transcriptRef.current.filter((t) => t.role === "user").length,
+      interruptionCount: interruptionsRef.current.length,
+      durationSec: Math.round((Date.now() - startTime) / 1000),
+    });
     sessionStorage.setItem(
       "pitchforge_measured",
       JSON.stringify({
