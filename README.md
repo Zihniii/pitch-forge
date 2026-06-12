@@ -121,11 +121,6 @@ Create a `.env` file:
 - Microphone permission required (the Arena streams mic audio)
 - Audio output (speakers/headphones) for the persona's voice
 
-## Extras
-
-- `docs/prd.md` — full product requirements document
-- `docs/pitchforge-pm-portfolio.md` — Marp slide deck (export to PDF: `npx @marp-team/marp-cli docs/pitchforge-pm-portfolio.md --pdf`)
-
 ## Commands
 
 ```bash
