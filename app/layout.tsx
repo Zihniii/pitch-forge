@@ -3,6 +3,7 @@ import Script from "next/script";
 import "@/index.css";
 import { Toaster } from "@/components/ui/sonner";
 import { AppLayout } from "@/components/AppLayout";
+import { PendoInit } from "@/components/PendoInit";
 
 export const metadata: Metadata = {
   title: "PitchForge",
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             z=e.getElementsByTagName(n)[0];z.parentNode.insertBefore(y,z);})(window,document,'script','pendo');
           })('5315572734820352');
         `}</Script>
+        <PendoInit />
         <AppLayout>{children}</AppLayout>
         <Toaster
           position="top-center"
