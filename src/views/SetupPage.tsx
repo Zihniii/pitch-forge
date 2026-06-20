@@ -1,5 +1,7 @@
+"use client";
+
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   ArrowLeft,
@@ -57,7 +59,7 @@ const CATEGORY_LABELS: Record<PersonaCategory, string> = {
 type Stage = 1 | 2 | 3;
 
 export default function SetupPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [stage, setStage] = useState<Stage>(1);
 
   const [nameAndRole, setNameAndRole] = useState("");
@@ -119,7 +121,7 @@ export default function SetupPage() {
       pressureLevel,
     });
 
-    navigate("/session");
+    router.push("/session");
   };
 
   const canAdvance = stage === 1 ? !!(nameAndRole.trim() && productDescription.trim() && valueProposition.trim()) : true;
@@ -398,7 +400,7 @@ export default function SetupPage() {
             </button>
           ) : (
             <button
-              onClick={() => navigate("/")}
+              onClick={() => router.push("/")}
               className="rounded-lg px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
             >
               Cancel

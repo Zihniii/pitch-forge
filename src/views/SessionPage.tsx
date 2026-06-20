@@ -1,5 +1,7 @@
+"use client";
+
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { Mic, MicOff, Square, Zap, Captions, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { OpponentPresence } from "@/components/OpponentPresence";
@@ -35,7 +37,7 @@ import type {
 } from "@/types";
 
 export default function SessionPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
 
   const [setup, setSetup] = useState<SessionSetup | null>(null);
   const [cognitiveState, setCognitiveState] = useState<CognitiveState | null>(null);
@@ -436,8 +438,8 @@ export default function SessionPage() {
         interruptionCount: interruptionsRef.current.length,
       })
     );
-    navigate("/feedback");
-  }, [setup, sessionId, startTime, navigate]);
+    router.push("/feedback");
+  }, [setup, sessionId, startTime, router]);
 
   // ---- No setup ----
   if (!setup) {
@@ -447,7 +449,7 @@ export default function SessionPage() {
           <p className="font-display text-lg font-semibold">No active engagement</p>
           <p className="text-sm text-muted-foreground">Brief a session before entering the arena.</p>
           <button
-            onClick={() => navigate("/setup")}
+            onClick={() => router.push("/setup")}
             className="rounded-lg bg-primary px-5 py-2.5 font-display text-sm font-semibold text-primary-foreground cursor-pointer"
           >
             Go to briefing
@@ -505,7 +507,7 @@ export default function SessionPage() {
           )}
           {!connecting && (
             <button
-              onClick={() => navigate("/setup")}
+              onClick={() => router.push("/setup")}
               className="mt-4 font-mono text-[11px] uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-foreground cursor-pointer"
             >
               Back to briefing

@@ -1,4 +1,6 @@
-import { useNavigate } from "react-router-dom";
+"use client";
+
+import { useRouter } from "next/navigation";
 import { Trash2, ArrowRight, Swords } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getAllSessions, deleteSession } from "@/services/storage";
@@ -7,7 +9,7 @@ import { PERSONAS, SCENARIOS } from "@/lib/constants";
 import type { SessionRecord } from "@/types";
 
 export default function HistoryPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const sessions = getAllSessions()
     .filter((s) => s.feedback !== null)
     .sort((a, b) => (b.endedAt || 0) - (a.endedAt || 0));
@@ -59,7 +61,7 @@ export default function HistoryPage() {
               Your record is clean. Step into the arena and start building it.
             </p>
             <button
-              onClick={() => navigate("/setup")}
+              onClick={() => router.push("/setup")}
               className="group mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 font-display text-[13px] font-semibold text-primary-foreground transition-all hover:gap-3 cursor-pointer"
             >
               Enter the arena
@@ -69,7 +71,7 @@ export default function HistoryPage() {
         ) : (
           <div className="mt-8 space-y-2">
             {sessions.map((s) => (
-              <Row key={s.id} session={s} onOpen={() => navigate(`/feedback?review=${s.id}`)} onDelete={() => handleDelete(s.id)} />
+              <Row key={s.id} session={s} onOpen={() => router.push(`/feedback?review=${s.id}`)} onDelete={() => handleDelete(s.id)} />
             ))}
           </div>
         )}

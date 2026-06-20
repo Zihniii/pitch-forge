@@ -1,5 +1,7 @@
+"use client";
+
 import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Trophy,
   AlertTriangle,
@@ -32,8 +34,8 @@ const VERDICT_COPY: Record<Verdict, { word: string; line: string; spotlight: str
 };
 
 export default function FeedbackPage() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const reviewId = searchParams.get("review");
   const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,19 +52,19 @@ export default function FeedbackPage() {
     if (reviewId) {
       const past = getSession(reviewId);
       if (!past || !past.feedback) {
-        navigate("/history");
+        router.push("/history");
         return;
       }
       setSession(past);
       setFeedback(past.feedback);
       setRatingDelta(sessionRatingDelta(past));
-      setRevealed(true); // skip the dramatic reveal when reviewing
+      setRevealed(true);
       setLoading(false);
       return;
     }
     const current = getCurrentSession();
     if (!current) {
-      navigate("/");
+      router.push("/");
       return;
     }
     setSession(current);
@@ -155,7 +157,7 @@ export default function FeedbackPage() {
         transcriptUpToTurn: session.transcript.filter((t) => t.id <= userTurn.id),
       })
     );
-    navigate("/rewind");
+    router.push("/rewind");
   };
 
   // ---- Loading: the wait builds tension ----
@@ -209,7 +211,7 @@ export default function FeedbackPage() {
               </button>
             )}
             <button
-              onClick={() => navigate(isEmpty ? "/setup" : "/")}
+              onClick={() => router.push(isEmpty ? "/setup" : "/")}
               className={cn(
                 "rounded-lg px-5 py-2.5 font-display text-sm font-semibold cursor-pointer",
                 isEmpty
@@ -367,7 +369,7 @@ export default function FeedbackPage() {
           </div>
           <p className="mt-2 text-[14px] leading-relaxed text-foreground">{feedback.replayChallenge}</p>
           <button
-            onClick={() => navigate("/setup")}
+            onClick={() => router.push("/setup")}
             className="group mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-display text-[13px] font-semibold text-primary-foreground transition-all hover:gap-3 cursor-pointer"
           >
             Run it back
@@ -484,14 +486,14 @@ export default function FeedbackPage() {
           {isReview ? (
             <>
               <button
-                onClick={() => navigate("/history")}
+                onClick={() => router.push("/history")}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-display text-[14px] font-semibold text-primary-foreground cursor-pointer"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back to record
               </button>
               <button
-                onClick={() => navigate("/setup")}
+                onClick={() => router.push("/setup")}
                 className="flex items-center justify-center gap-2 rounded-lg border border-border px-5 py-3 text-[14px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
               >
                 <RotateCcw className="h-4 w-4" />
@@ -501,14 +503,14 @@ export default function FeedbackPage() {
           ) : (
             <>
               <button
-                onClick={() => navigate("/setup")}
+                onClick={() => router.push("/setup")}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-display text-[14px] font-semibold text-primary-foreground cursor-pointer"
               >
                 <RotateCcw className="h-4 w-4" />
                 New session
               </button>
               <button
-                onClick={() => navigate("/")}
+                onClick={() => router.push("/")}
                 className="flex items-center justify-center gap-2 rounded-lg border border-border px-5 py-3 text-[14px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
               >
                 <Home className="h-4 w-4" />

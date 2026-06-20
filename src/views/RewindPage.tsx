@@ -1,5 +1,7 @@
+"use client";
+
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Mic, Square, RotateCcw, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { OpponentPresence } from "@/components/OpponentPresence";
@@ -20,7 +22,7 @@ interface RewindContext {
 type RewindStatus = "ready" | "listening" | "processing" | "persona-speaking" | "done";
 
 export default function RewindPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [context, setContext] = useState<RewindContext | null>(null);
   const [status, setStatus] = useState<RewindStatus>("ready");
   const [newAnswer, setNewAnswer] = useState("");
@@ -34,7 +36,7 @@ export default function RewindPage() {
   useEffect(() => {
     const raw = sessionStorage.getItem("pitchforge_rewind");
     if (!raw) {
-      navigate("/");
+      router.push("/");
       return;
     }
     setContext(JSON.parse(raw) as RewindContext);
@@ -144,7 +146,7 @@ export default function RewindPage() {
 
       <header className="relative z-20 flex items-center gap-3 px-5 py-4 md:px-8">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => router.back()}
           className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -264,7 +266,7 @@ export default function RewindPage() {
               Again
             </button>
             <button
-              onClick={() => navigate(-1)}
+              onClick={() => router.back()}
               className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-display text-[13px] font-semibold text-primary-foreground cursor-pointer"
             >
               <Check className="h-4 w-4" />

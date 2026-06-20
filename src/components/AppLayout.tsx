@@ -1,4 +1,6 @@
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+"use client";
+
+import { usePathname, useRouter } from "next/navigation";
 import { Logo } from "@/components/Logo";
 
 /**
@@ -9,16 +11,16 @@ import { Logo } from "@/components/Logo";
  */
 const IMMERSIVE = ["/session", "/feedback", "/rewind"];
 
-export function AppLayout() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const immersive = IMMERSIVE.includes(location.pathname);
+export function AppLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const immersive = IMMERSIVE.includes(pathname);
 
   return (
     <div className="min-h-screen bg-background">
       {!immersive && (
         <button
-          onClick={() => navigate("/")}
+          onClick={() => router.push("/")}
           className="fixed top-5 left-5 md:top-6 md:left-8 z-50 flex items-center gap-2 cursor-pointer group"
           aria-label="PitchForge — Command Deck"
         >
@@ -29,7 +31,7 @@ export function AppLayout() {
         </button>
       )}
       <main>
-        <Outlet />
+        {children}
       </main>
     </div>
   );

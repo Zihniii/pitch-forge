@@ -1,17 +1,12 @@
-import { GoogleGenAI, Modality } from "@google/genai";
-import type { Session } from "@google/genai";
 import type { SessionSetup } from "@/types";
 import { PERSONAS, PRESSURE_LEVELS, SCENARIOS } from "@/lib/constants";
 import { startMicCapture, AudioPlayer, type MicCaptureHandle } from "./live-audio";
 
 // ============================================================
-// Gemini Live session — real-time voice with native audio,
-// built-in VAD and barge-in. One WebSocket does STT+LLM+TTS.
+// Gemini Live session — real-time voice via server WebSocket
+// proxy. API keys stay server-side.
 // ============================================================
 
-// Native-audio dialog model (free tier on AI Studio).
-// Names differ across API versions and change often; we try these in order
-// and use whichever the connected key actually supports.
 const LIVE_MODEL_CANDIDATES = [
   "gemini-live-2.5-flash-preview",
   "gemini-2.5-flash-preview-native-audio-dialog",
@@ -19,8 +14,6 @@ const LIVE_MODEL_CANDIDATES = [
   "gemini-2.0-flash-exp",
 ];
 
-// Map each persona to a distinct Live prebuilt voice for character variety.
-// Live voices: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr.
 const LIVE_VOICE_BY_PERSONA: Record<string, string> = {
   "friendly-angel": "Puck",
   "skeptical-vc": "Charon",
@@ -97,16 +90,12 @@ HOW TO BEHAVE IN THIS LIVE CONVERSATION:
 - Stay 100% in character at all times. Never mention being an AI, a model, or a simulation.`;
 }
 
-// ============================================================
-// Session wrapper
-// ============================================================
-
 export interface LiveCallbacks {
-  onUserText: (text: string) => void;       // streamed input transcription
-  onPersonaText: (text: string) => void;    // streamed output transcription
+  onUserText: (text: string) => void;
+  onPersonaText: (text: string) => void;
   onPersonaSpeakingStart: () => void;
   onPersonaSpeakingEnd: () => void;
-  onInterrupted: () => void;                 // model output interrupted (barge-in)
+  onInterrupted: () => void;
   onTurnComplete: () => void;
   onError: (msg: string) => void;
   onOpen: () => void;
@@ -114,24 +103,15 @@ export interface LiveCallbacks {
 }
 
 export class LiveSession {
-  private ai: GoogleGenAI;
-  private aiBeta: GoogleGenAI;
-  private session: Session | null = null;
+  private ws: WebSocket | null = null;
   private mic: MicCaptureHandle | null = null;
   private player: AudioPlayer;
   private setup: SessionSetup;
   private cb: LiveCallbacks;
   private closed = false;
-  private speaking = false;
   private muted = false;
 
   constructor(setup: SessionSetup, cb: LiveCallbacks) {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error("VITE_GEMINI_API_KEY is not set");
-    // Live preview models are served on the v1alpha API version; the SDK
-    // defaults to v1beta (which is why bidiGenerateContent was "not found").
-    this.ai = new GoogleGenAI({ apiKey, apiVersion: "v1alpha" });
-    this.aiBeta = new GoogleGenAI({ apiKey, apiVersion: "v1beta" });
     this.setup = setup;
     this.cb = cb;
     this.player = new AudioPlayer();
@@ -142,23 +122,19 @@ export class LiveSession {
   }
 
   isPersonaSpeaking(): boolean {
-    return this.speaking || this.player.playing;
+    return this.player.playing;
   }
 
   async start(): Promise<void> {
     await this.player.resume();
 
-    // 1) Request mic FIRST so a permission failure surfaces clearly before connecting.
+    // 1) Request mic first so a permission failure surfaces clearly.
     try {
       this.mic = await startMicCapture((b64) => {
-        if (this.closed || this.muted || !this.session) return;
-        try {
-          this.session.sendRealtimeInput({
-            audio: { data: b64, mimeType: "audio/pcm;rate=16000" },
-          });
-        } catch {
-          /* socket may be momentarily closed during reconnection */
-        }
+        if (this.closed || this.muted || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        // Send audio as binary
+        const binary = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        this.ws.send(binary);
       });
       console.log("[Live] mic capture started");
     } catch (e: any) {
@@ -166,112 +142,84 @@ export class LiveSession {
       throw e;
     }
 
-    // 2) Try each (apiVersion × model) combo until one connects.
-    const attempts: { label: string; client: GoogleGenAI; model: string }[] = [];
-    for (const model of LIVE_MODEL_CANDIDATES) {
-      attempts.push({ label: `v1alpha/${model}`, client: this.ai, model });
-    }
-    for (const model of LIVE_MODEL_CANDIDATES) {
-      attempts.push({ label: `v1beta/${model}`, client: this.aiBeta, model });
-    }
+    // 2) Connect to the server WS proxy.
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.hostname}:3001/api/live`;
+    this.ws = new WebSocket(wsUrl);
 
-    let lastErr = "";
-    for (const a of attempts) {
-      try {
-        console.log("[Live] trying:", a.label);
-        await this.connectModel(a.client, a.model);
-        console.log("[Live] connected:", a.label);
-        return; // success
-      } catch (e: any) {
-        lastErr = e?.message ?? String(e);
-        console.warn(`[Live] ${a.label} failed: ${lastErr}`);
+    this.ws.onopen = () => {
+      console.log("[Live] WS connected to proxy");
+
+      // Send the start message with session config.
+      const systemInstruction = buildSystemInstruction(this.setup);
+      const voiceName = voiceFor(this.setup.persona);
+      this.ws!.send(JSON.stringify({
+        type: "start",
+        systemInstruction,
+        voiceName,
+      }));
+    };
+
+    this.ws.onmessage = (event) => {
+      if (this.closed) return;
+
+      // Binary = audio chunk from Gemini
+      if (event.data instanceof Blob) {
+        event.data.arrayBuffer().then((buf) => {
+          const b64 = arrayBufferToBase64(buf);
+          this.player.enqueue(b64, () => {
+            if (!this.player.playing) {
+              this.cb.onPersonaSpeakingEnd();
+            }
+          });
+        });
+        return;
       }
-    }
-    throw new Error(
-      `Live API unavailable on this key (tried v1alpha + v1beta). Last error: ${lastErr}`
-    );
-  }
 
-  /**
-   * Connect to a single model on a given client. Resolves once the session is
-   * confirmed open (setupComplete). Rejects if the socket closes early
-   * (e.g. "model not found"), so the caller can try the next combo.
-   */
-  private connectModel(client: GoogleGenAI, model: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const ok = () => {
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
-      };
-      const fail = (msg: string) => {
-        if (!settled) {
-          settled = true;
-          reject(new Error(msg));
-        }
-      };
+      // Text = JSON message
+      try {
+        const msg = JSON.parse(event.data);
+        this.handleMessage(msg);
+      } catch {
+        // ignore malformed messages
+      }
+    };
 
-      client.live
-        .connect({
-          model,
-          config: {
-            responseModalities: [Modality.AUDIO],
-            systemInstruction: buildSystemInstruction(this.setup),
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voiceFor(this.setup.persona) },
-              },
-            },
-            inputAudioTranscription: {},
-            outputAudioTranscription: {},
-          },
-          callbacks: {
-            onopen: () => {
-              console.log("[Live] socket open for", model);
-            },
-            onmessage: (msg: any) => {
-              // First real message (setupComplete) confirms the model is valid.
-              if (msg?.setupComplete && !settled) {
-                ok();
-                this.cb.onOpen();
-                try {
-                  this.session?.sendClientContent({
-                    turns: "Begin now. Greet me briefly in character and hit me with your opening challenge.",
-                    turnComplete: true,
-                  });
-                } catch (e) {
-                  console.error("[Live] opening nudge failed:", e);
-                }
-              }
-              try {
-                this.handleMessage(msg);
-              } catch (e) {
-                console.error("[Live] handleMessage error:", e);
-              }
-            },
-            onerror: (e: any) => {
-              const m = e?.message ?? "Live connection error";
-              if (!settled) fail(m);
-              else this.cb.onError(m);
-            },
-            onclose: (e: any) => {
-              const reason = e?.reason ?? "";
-              console.log("[Live] connection closed:", reason);
-              // Early close before confirmation = this model is unusable.
-              if (!settled) {
-                fail(reason || "Connection closed before setup");
-              } else {
-                this.cb.onClose();
-              }
-            },
-          },
-        })
-        .then((session) => {
-          this.session = session;
-        })
-        .catch((e: any) => fail(e?.message ?? String(e)));
+    this.ws.onerror = (e) => {
+      console.error("[Live] WS error:", e);
+    };
+
+    this.ws.onclose = () => {
+      console.log("[Live] WS closed");
+      if (!this.closed) {
+        this.cb.onClose();
+      }
+    };
+
+    // Wait for the "open" confirmation from the server
+    await new Promise<void>((resolve, reject) => {
+      const onMsg = (event: MessageEvent) => {
+        if (typeof event.data !== "string") return;
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "open") {
+            this.ws?.removeEventListener("message", onMsg);
+            this.cb.onOpen();
+            resolve();
+          }
+          if (msg.type === "error") {
+            this.ws?.removeEventListener("message", onMsg);
+            reject(new Error(msg.message));
+          }
+        } catch {}
+      };
+      this.ws?.addEventListener("message", onMsg);
+
+      // Timeout after 15 seconds.
+      setTimeout(() => {
+        this.ws?.removeEventListener("message", onMsg);
+        reject(new Error("Live API connection timed out"));
+      }, 15000);
     });
   }
 
@@ -280,47 +228,33 @@ export class LiveSession {
   }
 
   private handleMessage(msg: any) {
-    if (msg?.setupComplete) console.log("[Live] setupComplete");
-    const sc = msg.serverContent;
-    if (!sc) return;
-
-    // Barge-in: model was cut off because the user started talking.
-    if (sc?.interrupted) {
-      this.player.flush();
-      this.speaking = false;
-      this.cb.onInterrupted();
-      this.cb.onPersonaSpeakingEnd();
-      return;
-    }
-
-    // Streamed audio out.
-    const parts = sc?.modelTurn?.parts ?? [];
-    for (const part of parts) {
-      const audio = part.inlineData?.data;
-      if (audio) {
-        if (!this.speaking) {
-          this.speaking = true;
-          this.cb.onPersonaSpeakingStart();
-        }
-        this.player.enqueue(audio, () => {
-          if (!this.player.playing) {
-            this.speaking = false;
-            this.cb.onPersonaSpeakingEnd();
-          }
-        });
-      }
-    }
-
-    // Transcriptions (for the transcript / feedback).
-    if (sc?.outputTranscription?.text) {
-      this.cb.onPersonaText(sc.outputTranscription.text);
-    }
-    if (sc?.inputTranscription?.text) {
-      this.cb.onUserText(sc.inputTranscription.text);
-    }
-
-    if (sc?.turnComplete) {
-      this.cb.onTurnComplete();
+    switch (msg.type) {
+      case "user_text":
+        this.cb.onUserText(msg.text);
+        break;
+      case "persona_text":
+        this.cb.onPersonaText(msg.text);
+        break;
+      case "speaking_start":
+        this.cb.onPersonaSpeakingStart();
+        break;
+      case "speaking_end":
+        this.cb.onPersonaSpeakingEnd();
+        break;
+      case "interrupted":
+        this.player.flush();
+        this.cb.onInterrupted();
+        this.cb.onPersonaSpeakingEnd();
+        break;
+      case "turn_complete":
+        this.cb.onTurnComplete();
+        break;
+      case "error":
+        this.cb.onError(msg.message);
+        break;
+      case "close":
+        this.cb.onClose();
+        break;
     }
   }
 
@@ -328,7 +262,21 @@ export class LiveSession {
     this.closed = true;
     try { this.mic?.stop(); } catch { /* noop */ }
     try { this.player.close(); } catch { /* noop */ }
-    try { this.session?.close(); } catch { /* noop */ }
-    this.session = null;
+    try {
+      if (this.ws) {
+        this.ws.send(JSON.stringify({ type: "stop" }));
+        this.ws.close();
+      }
+    } catch { /* noop */ }
+    this.ws = null;
   }
+}
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }

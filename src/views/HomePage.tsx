@@ -1,4 +1,6 @@
-import { useNavigate } from "react-router-dom";
+"use client";
+
+import { useRouter } from "next/navigation";
 import { ArrowRight, Flame, Crosshair, Target } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { getProgressionProfile } from "@/services/progression";
@@ -7,7 +9,7 @@ import { cn } from "@/lib/utils";
 import type { PersonaId } from "@/types";
 
 export default function HomePage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const p = getProgressionProfile();
   const hasHistory = p.totalSessions > 0;
 
@@ -16,7 +18,7 @@ export default function HomePage() {
       "pitchforge_quickstart",
       JSON.stringify({ scenario, persona })
     );
-    navigate("/setup");
+    router.push("/setup");
   };
 
   return (
@@ -25,7 +27,7 @@ export default function HomePage() {
 
       <div className="relative page-enter mx-auto max-w-5xl px-6 pt-24 pb-20 md:pt-28">
         {!hasHistory ? (
-          <FirstRun onEnter={() => navigate("/setup")} />
+          <FirstRun onEnter={() => router.push("/setup")} />
         ) : (
           <div className="stagger space-y-10">
             {/* Rating headline */}
@@ -33,7 +35,7 @@ export default function HomePage() {
 
             {/* Primary CTA */}
             <button
-              onClick={() => navigate("/setup")}
+              onClick={() => router.push("/setup")}
               className="group relative w-full overflow-hidden rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/15 via-primary/5 to-transparent px-7 py-6 text-left transition-all duration-200 hover:border-primary/60 cursor-pointer"
             >
               <div className="relative z-10 flex items-center justify-between">
@@ -94,7 +96,7 @@ export default function HomePage() {
 
             {/* Record link */}
             <button
-              onClick={() => navigate("/history")}
+              onClick={() => router.push("/history")}
               className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
             >
               View combat record
