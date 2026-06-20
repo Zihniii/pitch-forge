@@ -332,6 +332,16 @@ export default function SessionPage() {
     setCurrentTranscript("");
     setStatus("processing");
 
+    (window as any).pendo?.track("user_turn_completed", {
+      sessionId,
+      turnId,
+      wpm,
+      fillerCount,
+      buzzwordCount,
+      durationSec: Math.round(durationMs / 1000),
+      wordCount: signals.wordCount,
+    });
+
     const interruption = checkForInterruption(text, durationMs, wpm, stateRef.current);
     let directive = null;
     if (interruption.shouldInterrupt && interruption.reason) {
