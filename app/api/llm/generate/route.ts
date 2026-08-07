@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY!;
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "qwen/qwen3-next-80b-a3b-instruct:free";
 
 const genai = new GoogleGenerativeAI(GEMINI_KEY);
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_FALLBACK_MODEL = "gemini-2.5-flash-lite";
 
 function isQuota(msg: string) {

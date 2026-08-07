@@ -8,10 +8,7 @@ import { startMicCapture, AudioPlayer, type MicCaptureHandle } from "./live-audi
 // ============================================================
 
 const LIVE_MODEL_CANDIDATES = [
-  "gemini-live-2.5-flash-preview",
-  "gemini-2.5-flash-preview-native-audio-dialog",
-  "gemini-2.0-flash-live-001",
-  "gemini-2.0-flash-exp",
+  "gemini-3.1-flash-live-preview",
 ];
 
 const LIVE_VOICE_BY_PERSONA: Record<string, string> = {

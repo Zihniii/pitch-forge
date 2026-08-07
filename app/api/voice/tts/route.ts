@@ -6,7 +6,7 @@ const genai = new GoogleGenAI({
   apiVersion: "v1alpha",
 });
 
-const TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const TTS_MODEL = "gemini-3.1-flash-tts-preview";
 
 const TTS_VOICE: Record<string, string> = {
   "friendly-angel": "Puck", "skeptical-vc": "Charon", "growth-investor": "Kore",

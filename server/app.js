@@ -6,7 +6,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_MODEL =
-  process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+  process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "qwen/qwen3-next-80b-a3b-instruct:free";
 
 if (!GEMINI_KEY) {
   console.error("FATAL: GEMINI_API_KEY is not set");
@@ -25,7 +25,7 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 
 // ── LLM text generation ─────────────────────────────────────────
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_FALLBACK_MODEL = "gemini-2.5-flash-lite";
 
 function isQuota(msg) {
@@ -113,7 +113,7 @@ app.post("/api/llm/generate", async (req, res) => {
 });
 
 // ── TTS proxy ────────────────────────────────────────────────────
-const TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const TTS_MODEL = "gemini-3.1-flash-tts-preview";
 const TTS_VOICE = {
   "friendly-angel": "Puck", "skeptical-vc": "Charon", "growth-investor": "Kore",
   "technical-investor": "Orus", "technical-recruiter": "Leda", "hiring-manager": "Charon",

@@ -46,7 +46,7 @@ Open in **Chrome**, tap **Enter the arena**, allow the microphone, and start tal
 
 The Arena tries the richest voice path available and **degrades gracefully** so a demo never dies:
 
-1. **Gemini Live** (attempted first) — one WebSocket doing STT + reasoning + native audio TTS with built-in voice-activity detection and **barge-in** (the persona can cut you off; you can cut in). Tried across 4 model candidates (`gemini-live-2.5-flash-preview`, `gemini-2.5-flash-preview-native-audio-dialog`, `gemini-2.0-flash-live-001`, `gemini-2.0-flash-exp`) on both `v1alpha` and `v1beta` endpoints.
+1. **Gemini Live** (attempted first) — one WebSocket doing STT + reasoning + native audio TTS with built-in voice-activity detection and **barge-in** (the persona can cut you off; you can cut in). Uses `gemini-3.1-flash-live-preview` on `v1alpha`/`v1beta` endpoints.
 2. **Turn-based fallback** (if Live can't connect) — push-to-talk via the Web Speech API, Gemini text for the persona, and **Gemini TTS** for the voice, which itself **falls back to browser SpeechSynthesis** if unavailable.
 3. **Live mic level meter** and **mute toggle** available in Gemini Live mode.
 
@@ -148,14 +148,14 @@ Create a `.env` file (keys are server-side only — never exposed to the browser
 |----------|----------|-------------|
 | `GEMINI_API_KEY` | Yes | Google AI Studio key — [get one](https://aistudio.google.com/apikey) |
 | `OPENROUTER_API_KEY` | Optional | OpenRouter key for the `fast` tier — [get one](https://openrouter.ai/keys). Leave blank to use Gemini only. |
-| `OPENROUTER_MODEL` | Optional | Free model id. Default `meta-llama/llama-3.3-70b-instruct:free`. Names churn — see [free models](https://openrouter.ai/models?max_price=0). |
+| `OPENROUTER_MODEL` | Optional | Free model id. Default `qwen/qwen3-next-80b-a3b-instruct:free`. Names churn — see [free models](https://openrouter.ai/models?max_price=0). |
 | `PORT` | Optional | Server port for the Express proxy (default `3001`) |
 
 > ⚠️ **Security note — API keys stay server-side.** All LLM and TTS calls are proxied through Next.js API routes (`/api/llm/generate`, `/api/voice/tts`). Keys are never exposed to the browser. This is safe for local use, demos, and deployment (provided your host respects `.env`).
 
 ## Free-Tier Notes
 
-- Gemini retired the 2.0 Flash models (June 2026); this app uses **`gemini-2.5-flash`**.
+- Gemini retired the 2.0 Flash models (June 2026) and the original Live previews (Dec 2025); this app uses **`gemini-3.6-flash`** for text and **`gemini-3.1-flash-live-preview`** for real-time voice. Live fallback model: `gemini-2.5-flash-lite`.
 - Free tiers have **per-minute and per-day** caps. If you hit a `429`, the app shows how long to wait; offloading persona turns to OpenRouter dramatically reduces Gemini usage.
 - OpenRouter free model names change often — swap `OPENROUTER_MODEL` if you see a `404` (no code change needed).
 
